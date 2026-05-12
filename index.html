@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta
+      name="description"
+      content="Мобильный калькулятор совместных расходов: участники, покупки, доли и итоговые переводы."
+    />
+    <title>Скинуться</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Калькулятор расходов</p>
+          <h1>Скинуться</h1>
+        </div>
+        <button class="icon-button" id="shareProjectButton" type="button" aria-label="Поделиться расчетом">
+          <span aria-hidden="true">↗</span>
+        </button>
+      </header>
+
+      <section class="project-panel" aria-labelledby="projectTitleLabel">
+        <label class="field-label" id="projectTitleLabel" for="projectName">Название</label>
+        <input id="projectName" class="text-input project-title" type="text" autocomplete="off" />
+      </section>
+
+      <section class="workspace">
+        <div class="section-header">
+          <div>
+            <h2>Участники</h2>
+            <p id="peopleCount">0 человек</p>
+          </div>
+        </div>
+        <form class="inline-form" id="personForm">
+          <input
+            id="personName"
+            class="text-input"
+            type="text"
+            placeholder="Имя"
+            autocomplete="off"
+            required
+          />
+          <button class="primary-button" type="submit">Добавить</button>
+        </form>
+        <div class="chip-list" id="peopleList" aria-live="polite"></div>
+      </section>
+
+      <section class="workspace">
+        <div class="section-header">
+          <div>
+            <h2>Расход</h2>
+            <p>Кто оплатил и на кого делим</p>
+          </div>
+        </div>
+        <form class="expense-form" id="expenseForm">
+          <label class="field">
+            <span class="field-label">Название</span>
+            <input id="expenseName" class="text-input" type="text" placeholder="Такси, продукты, подарок" required />
+          </label>
+          <div class="two-columns">
+            <label class="field">
+              <span class="field-label">Сумма</span>
+              <input id="expenseAmount" class="text-input" type="number" min="0.01" step="0.01" placeholder="0" required />
+            </label>
+            <label class="field">
+              <span class="field-label">Кто платил</span>
+              <select id="expensePayer" class="text-input" required></select>
+            </label>
+          </div>
+          <fieldset class="participants-box">
+            <legend>Кто участвует</legend>
+            <div class="payer-actions">
+              <button class="ghost-button" id="selectAllButton" type="button">Все</button>
+              <button class="ghost-button" id="selectNoneButton" type="button">Никто</button>
+            </div>
+            <div class="participant-grid" id="expenseParticipants"></div>
+          </fieldset>
+          <button class="primary-button full-width" type="submit">Добавить расход</button>
+        </form>
+      </section>
+
+      <section class="workspace">
+        <div class="section-header">
+          <div>
+            <h2>Расходы</h2>
+            <p id="expensesCount">0 записей</p>
+          </div>
+          <button class="ghost-button danger" id="resetButton" type="button">Очистить</button>
+        </div>
+        <div class="expense-list" id="expensesList"></div>
+      </section>
+
+      <section class="workspace summary-panel">
+        <div class="section-header">
+          <div>
+            <h2>Итог</h2>
+            <p id="totalAmount">0 ₽ всего</p>
+          </div>
+        </div>
+        <div class="summary-list" id="summaryList"></div>
+      </section>
+    </main>
+
+    <template id="emptyStateTemplate">
+      <div class="empty-state">
+        <strong></strong>
+        <span></span>
+      </div>
+    </template>
+
+    <script src="./config.js"></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
