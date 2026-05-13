@@ -19,7 +19,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Калькулятор расходов</p>
-          <h1>Скинуться</h1>
+          <h1><span class="brand-icon" aria-hidden="true">₽</span>Скинуться</h1>
         </div>
         <button class="icon-button" id="shareProjectButton" type="button" aria-label="Поделиться расчетом">
           <span aria-hidden="true">↗</span>
@@ -34,7 +34,7 @@
       <section class="workspace">
         <div class="section-header">
           <div>
-            <h2>Участники</h2>
+            <h2><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4 19c0-3 2-5 4-5s4 2 4 5m0 0c0-3 2-5 4-5s4 2 4 5"/></svg></span>Участники</h2>
             <p id="peopleCount">0 человек</p>
           </div>
         </div>
@@ -47,7 +47,7 @@
             autocomplete="off"
             required
           />
-          <button class="primary-button" type="submit">Добавить</button>
+          <button class="primary-button" type="submit"><span class="button-icon" aria-hidden="true">＋</span>Добавить</button>
         </form>
         <div class="chip-list" id="peopleList" aria-live="polite"></div>
       </section>
@@ -55,7 +55,7 @@
       <section class="workspace">
         <div class="section-header">
           <div>
-            <h2>Расход</h2>
+            <h2><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h10v18l-2-1.2L13 21l-2-1.2L9 21l-2-1.2V3Zm3 5h4m-4 4h6m-6 4h3"/></svg></span>Расход</h2>
             <p>Кто оплатил и на кого делим</p>
           </div>
         </div>
@@ -82,17 +82,29 @@
             </div>
             <div class="participant-grid" id="expenseParticipants"></div>
           </fieldset>
-          <button class="primary-button full-width" type="submit">Добавить расход</button>
+          <button class="primary-button full-width" type="submit"><span class="button-icon" aria-hidden="true">＋</span>Добавить расход</button>
         </form>
       </section>
 
       <section class="workspace">
         <div class="section-header">
           <div>
-            <h2>Расходы</h2>
+            <h2><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></svg></span>Расходы</h2>
             <p id="expensesCount">0 записей</p>
           </div>
           <button class="ghost-button danger" id="resetButton" type="button">Очистить</button>
+        </div>
+        <div class="filter-bar" aria-label="Сортировка расходов">
+          <label class="field sort-field" for="expenseSort">
+            <span class="field-label"><span class="button-icon" aria-hidden="true">↕</span>Сортировка</span>
+            <select id="expenseSort" class="text-input compact-select">
+              <option value="created-desc">По добавлению</option>
+              <option value="name-asc">Покупки А-Я</option>
+              <option value="name-desc">Покупки Я-А</option>
+              <option value="payer-asc">Платившие А-Я</option>
+              <option value="payer-desc">Платившие Я-А</option>
+            </select>
+          </label>
         </div>
         <div class="expense-list" id="expensesList"></div>
       </section>
@@ -100,11 +112,22 @@
       <section class="workspace summary-panel">
         <div class="section-header">
           <div>
-            <h2>Итог</h2>
+            <h2><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 19h12M8 5h8M9 5c5 5-5 9 0 14m6-14c-5 5 5 9 0 14"/></svg></span>Итог</h2>
             <p id="totalAmount">0 ₽ всего</p>
           </div>
         </div>
         <div class="summary-list" id="summaryList"></div>
+        <details class="details-panel">
+          <summary>
+            <span class="details-arrow" aria-hidden="true"></span>
+            <span>Больше информации</span>
+          </summary>
+          <div class="details-content">
+            <p class="details-total"><strong>Всего потрачено денег:</strong> <span id="detailsTotal">0 ₽</span></p>
+            <h3>Стоимость для каждого:</h3>
+            <div class="person-cost-list" id="personCostsList"></div>
+          </div>
+        </details>
       </section>
     </main>
 
