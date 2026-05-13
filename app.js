@@ -3,6 +3,7 @@ const STORAGE_KEY = "split-app-state-v1";
 const state = {
   projectId: null,
   projectName: "Событие",
+  expenseSort: "created-desc",
   people: [],
   expenses: [],
 };
@@ -30,8 +31,11 @@ const nodes = {
   expenseParticipants: document.querySelector("#expenseParticipants"),
   expensesList: document.querySelector("#expensesList"),
   expensesCount: document.querySelector("#expensesCount"),
+  expenseSort: document.querySelector("#expenseSort"),
   totalAmount: document.querySelector("#totalAmount"),
   summaryList: document.querySelector("#summaryList"),
+  detailsTotal: document.querySelector("#detailsTotal"),
+  personCostsList: document.querySelector("#personCostsList"),
   selectAllButton: document.querySelector("#selectAllButton"),
   selectNoneButton: document.querySelector("#selectNoneButton"),
   resetButton: document.querySelector("#resetButton"),
@@ -114,11 +118,17 @@ function normalizeState(value) {
   return {
     projectId: typeof value.projectId === "string" && value.projectId.trim() ? value.projectId : null,
     projectName: typeof value.projectName === "string" && value.projectName.trim() ? value.projectName : "Событие",
+    expenseSort: getValidExpenseSort(value.expenseSort),
     people: Array.isArray(value.people) ? value.people.filter((person) => person.id && person.name) : [],
     expenses: Array.isArray(value.expenses)
       ? value.expenses.filter((expense) => expense.id && expense.name && expense.payerId && Number(expense.amount) > 0)
       : [],
   };
+}
+
+function getValidExpenseSort(value) {
+  const allowed = new Set(["created-desc", "name-asc", "name-desc", "payer-asc", "payer-desc"]);
+  return allowed.has(value) ? value : "created-desc";
 }
 
 function normalizeRemoteConfig(config) {
@@ -156,6 +166,7 @@ function makeProjectUrl(paramName, value) {
 function getPayload() {
   return {
     projectName: state.projectName,
+    expenseSort: state.expenseSort,
     people: state.people,
     expenses: state.expenses,
   };
@@ -320,6 +331,7 @@ function renderParticipantOptions() {
 
 function renderExpenses() {
   nodes.expensesCount.textContent = `${state.expenses.length} ${plural(state.expenses.length, "запись", "записи", "записей")}`;
+  nodes.expenseSort.value = state.expenseSort;
   nodes.expensesList.replaceChildren();
 
   if (!state.expenses.length) {
@@ -327,7 +339,7 @@ function renderExpenses() {
     return;
   }
 
-  state.expenses.forEach((expense) => {
+  getSortedExpenses().forEach((expense) => {
     const item = document.createElement("article");
     item.className = "expense-item";
 
@@ -364,7 +376,7 @@ function renderExpenses() {
 }
 
 function renderSummary() {
-  const total = state.expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  const total = getTotalAmount();
   nodes.totalAmount.textContent = `${money(total)} всего`;
   nodes.summaryList.replaceChildren();
 
@@ -400,11 +412,92 @@ function renderSummary() {
   });
 }
 
+function renderMoreInfo() {
+  const total = getTotalAmount();
+  const costs = calculatePersonalCosts();
+
+  nodes.detailsTotal.textContent = money(total);
+  nodes.personCostsList.replaceChildren();
+
+  if (!costs.length) {
+    nodes.personCostsList.append(makeEmptyState("Нет участников", "Добавьте людей и расходы, чтобы увидеть стоимость для каждого."));
+    return;
+  }
+
+  costs.forEach((cost) => {
+    const row = document.createElement("div");
+    row.className = "person-cost-item";
+
+    const name = document.createElement("span");
+    name.textContent = getPersonName(cost.personId);
+
+    const amount = document.createElement("strong");
+    amount.textContent = money(cost.amount);
+
+    row.append(name, amount);
+    nodes.personCostsList.append(row);
+  });
+}
+
 function render() {
   nodes.projectName.value = state.projectName;
   renderPeople();
   renderExpenses();
   renderSummary();
+  renderMoreInfo();
+}
+
+function getTotalAmount() {
+  return state.expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+}
+
+function compareText(first, second) {
+  return first.localeCompare(second, "ru", { sensitivity: "base" });
+}
+
+function getSortedExpenses() {
+  const indexedExpenses = state.expenses.map((expense, index) => ({ expense, index }));
+
+  indexedExpenses.sort((first, second) => {
+    if (state.expenseSort === "name-asc") {
+      return compareText(first.expense.name, second.expense.name) || first.index - second.index;
+    }
+    if (state.expenseSort === "name-desc") {
+      return compareText(second.expense.name, first.expense.name) || first.index - second.index;
+    }
+    if (state.expenseSort === "payer-asc") {
+      return compareText(getPersonName(first.expense.payerId), getPersonName(second.expense.payerId)) || first.index - second.index;
+    }
+    if (state.expenseSort === "payer-desc") {
+      return compareText(getPersonName(second.expense.payerId), getPersonName(first.expense.payerId)) || first.index - second.index;
+    }
+
+    return first.index - second.index;
+  });
+
+  return indexedExpenses.map(({ expense }) => expense);
+}
+
+function calculatePersonalCosts() {
+  const costs = new Map(state.people.map((person) => [person.id, 0]));
+
+  state.expenses.forEach((expense) => {
+    const amount = Number(expense.amount);
+    const participantIds = expense.participantIds.filter((id) => costs.has(id));
+    if (!participantIds.length) {
+      return;
+    }
+
+    const share = amount / participantIds.length;
+    participantIds.forEach((personId) => {
+      costs.set(personId, costs.get(personId) + share);
+    });
+  });
+
+  return state.people.map((person) => ({
+    personId: person.id,
+    amount: Math.round(costs.get(person.id) * 100) / 100,
+  }));
 }
 
 function calculateTransfers() {
@@ -607,6 +700,12 @@ nodes.personForm.addEventListener("submit", (event) => {
 nodes.expenseForm.addEventListener("submit", (event) => {
   event.preventDefault();
   addExpense();
+});
+
+nodes.expenseSort.addEventListener("change", (event) => {
+  state.expenseSort = getValidExpenseSort(event.target.value);
+  saveState();
+  renderExpenses();
 });
 
 nodes.selectAllButton.addEventListener("click", () => {
