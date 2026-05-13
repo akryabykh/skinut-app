@@ -2,95 +2,67 @@
 
 Мобильное веб-приложение для расчета совместных расходов.
 
+## Текущий этап
+
+Проект переведен на базовую архитектуру **Next.js App Router + TypeScript + Tailwind**. Рабочий калькулятор перенесен на маршрут `/app`, а `/` теперь публичный лендинг. Это подготовительный шаг перед авторизацией, проектами, валютами и invite-ссылками.
+
 ## Что уже есть
 
+- Лендинг на `/`.
+- Калькулятор на `/app`.
 - Участники проекта.
 - Расходы с плательщиком и списком участников.
 - Автоматический расчет итоговых переводов.
+- Раскрываемый блок с общей суммой и стоимостью для каждого.
+- Сортировка расходов по покупке и по плательщику.
 - Сохранение прогресса в браузере через `localStorage`.
-- Шаринг расчета через ссылку с данными, если Supabase не подключен.
-- Облачное сохранение через Supabase, если настроен `config.js`.
+- Облачное сохранение через текущую таблицу Supabase `projects`.
 - PWA manifest и service worker.
 
 ## Запуск локально
 
 ```bash
-python3 -m http.server 8000
+npm install
+npm run dev
 ```
 
 После запуска открыть:
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:3000
 ```
 
-## Публикация в облако
-
-### Вариант 1: GitHub Pages
-
-1. Создать пустой репозиторий на GitHub.
-2. Добавить remote:
+## Основные команды
 
 ```bash
-git remote add origin https://github.com/USER/REPO.git
+npm run dev
+npm run lint
+npm run build
 ```
 
-3. Отправить код:
+## Переменные окружения
+
+См. `.env.example`.
+
+Для текущего MVP в коде сохранен fallback на публичные Supabase URL/anon key, чтобы существующее облачное сохранение не сломалось при миграции. На следующих этапах эти значения нужно перенести в Vercel Environment Variables.
+
+## Ветки
+
+- `main` — продакшен-ветка, из нее Vercel публикует сайт.
+- `dev` — рабочая ветка для разработки.
+
+Стандартный процесс:
 
 ```bash
-git push -u origin main
+git checkout dev
+git pull origin dev
+# изменения
+git add .
+git commit -m "Meaningful message"
+git push origin dev
+# PR / merge dev -> main
 ```
 
-4. В GitHub открыть `Settings -> Pages`.
-5. В `Build and deployment` выбрать:
-   - Source: `Deploy from a branch`
-   - Branch: `main`
-   - Folder: `/root`
-6. Сайт будет доступен по адресу:
+## Supabase
 
-```text
-https://USER.github.io/REPO/
-```
-
-### Вариант 2: Vercel
-
-1. Импортировать GitHub-репозиторий в Vercel.
-2. Framework Preset: `Other`.
-3. Build Command: пусто.
-4. Output Directory: пусто или `./`.
-5. После деплоя Vercel выдаст публичный URL.
-
-## Подключение Supabase
-
-1. Создать проект в Supabase.
-2. Открыть `SQL Editor`.
-3. Выполнить SQL из файла `supabase/schema.sql`.
-4. Скопировать `config.example.js` в `config.js`.
-5. Вставить в `config.js` значения:
-
-```js
-window.SPLIT_APP_CONFIG = {
-  supabaseUrl: "https://your-project-ref.supabase.co",
-  supabaseAnonKey: "your-anon-public-key"
-};
-```
-
-После этого приложение будет сохранять проект в Supabase и делиться ссылкой вида:
-
-```text
-http://127.0.0.1:8000/?project=abc123
-```
-
-Для MVP таблица открыта на чтение и запись по публичной ссылке. Это нормально для простого шаринга без логина, но позже стоит добавить права доступа, владельцев проектов или секрет редактирования.
-
-Если приложение открывается локально с телефона по IP компьютера, можно временно добавить:
-
-```js
-publicBaseUrl: "http://10.168.1.66:8001/"
-```
-
-В облачном деплое это поле обычно не нужно: ссылка будет строиться от реального домена.
-
-## Следующий шаг
-
-Создать Supabase-проект, вставить ключи в `config.js`, проверить сохранение с двух устройств.
+Текущий MVP использует `supabase/schema.sql`: публичная таблица `projects` для шаринга расчетов без авторизации. Следующий большой блок заменит эту модель на Supabase Auth, `profiles`, `projects`, `project_members`, `project_invites` и RLS-политики по участникам.
