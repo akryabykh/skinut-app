@@ -524,7 +524,7 @@ h2 {
   }
 
   .participant-grid {
-    grid-template columns: 1fr;
+    grid-template-columns: 1fr;
   }
 
   .sort-field {
