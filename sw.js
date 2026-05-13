@@ -1,4 +1,4 @@
-const CACHE_NAME = "split-app-v3";
+const CACHE_NAME = "split-app-v4";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./config.js", "./manifest.webmanifest", "./icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
