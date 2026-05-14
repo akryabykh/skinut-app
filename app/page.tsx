@@ -7,7 +7,7 @@ import { Brand } from "@/components/brand";
 type SearchParams = Record<string, string | string[] | undefined>;
 
 type HomePageProps = {
-  searchParams?: Promise<SearchParams> | SearchParams;
+  searchParams?: Promise<SearchParams>;
 };
 
 function firstParam(value: string | string[] | undefined) {
