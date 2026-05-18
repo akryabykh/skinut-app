@@ -12,24 +12,21 @@
 //   Project → Settings → API
 //     URL                       → NEXT_PUBLIC_SUPABASE_URL
 //     Project API keys → anon   → NEXT_PUBLIC_SUPABASE_ANON_KEY
+//
+// TODO(env): we'd prefer to throw when env vars are missing, but on Vercel
+// preview deploys the NEXT_PUBLIC_* values are not getting inlined into the
+// client bundle for reasons we haven't pinned down yet (build cache cleared,
+// Sensitive flag off, names match — yet the bundle hash never changes and
+// process.env is undefined in the browser). Until that's sorted, keep the
+// hardcoded fallbacks — they point to the same Supabase project that anon
+// key is scoped to anyway, and they're safe to expose publicly.
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(
-      `Missing required environment variable: ${name}. ` +
-        `Set it in .env.local (local dev) or in your hosting provider's ` +
-        `dashboard. See lib/public-config.ts for details.`,
-    );
-  }
-  return value;
-}
+const FALLBACK_SUPABASE_URL = "https://eejbgcmdoxztcplwtvmy.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY = "sb_publishable_R9rxuAYxvBd-jhhaf8jIFQ_sAfl7sdm";
 
 export const publicConfig = {
-  supabaseUrl: required("NEXT_PUBLIC_SUPABASE_URL"),
-  supabaseAnonKey: required("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-  // Optional. When set, used as the absolute origin for emailRedirectTo
-  // in Supabase auth flows. If empty, Supabase falls back to the project's
-  // Site URL configured in the dashboard.
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL,
+  supabaseAnonKey:
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY,
   publicBaseUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "",
 };
