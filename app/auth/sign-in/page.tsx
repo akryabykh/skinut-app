@@ -1,17 +1,26 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Brand } from "@/components/brand";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SignInForm } from "./sign-in-form";
 
-export default function SignInPlaceholderPage() {
+export default async function SignInPage() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    redirect("/account");
+  }
+
   return (
     <main className="placeholder-page">
       <Brand />
       <section className="placeholder-panel">
-        <p className="eyebrow">Следующий блок</p>
-        <h1>Вход появится на следующем шаге</h1>
-        <p>Сейчас мы перенесли приложение на Next.js. Дальше подключим Supabase Auth: email, код подтверждения и пароль.</p>
-        <Link className="primary-button hero-button" href="/app">
-          Открыть калькулятор
-        </Link>
+        <p className="eyebrow">Вход</p>
+        <h1>С возвращением</h1>
+        <p>Войдите, чтобы продолжить вести свои проекты и историю трат.</p>
+        <SignInForm />
       </section>
     </main>
   );

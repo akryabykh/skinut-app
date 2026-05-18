@@ -738,6 +738,90 @@ h2 {
   line-height: 1.55;
 }
 
+.auth-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.auth-form .field {
+  gap: 6px;
+}
+
+.auth-form button[type="submit"] {
+  margin-top: 4px;
+}
+
+.auth-form button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-error {
+  color: var(--danger);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.auth-banner {
+  margin: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.94rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.auth-banner-error {
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--danger);
+  border: 1px solid rgba(180, 35, 24, 0.22);
+}
+
+.auth-banner-success {
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--brand-dark);
+  border: 1px solid rgba(15, 118, 110, 0.22);
+}
+
+.auth-foot {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.94rem;
+  text-align: center;
+}
+
+.auth-foot a {
+  color: var(--brand);
+  font-weight: 800;
+}
+
+.account-info {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.account-info div {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 10px 12px;
+}
+
+.account-info dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.account-info dd {
+  margin: 0;
+  font-weight: 700;
+}
+
 @media (max-width: 760px) {
   .landing-hero {
     min-height: 620px;
