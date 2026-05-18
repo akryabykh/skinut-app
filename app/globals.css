@@ -796,6 +796,32 @@ h2 {
   font-weight: 800;
 }
 
+.account-info {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.account-info div {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 10px 12px;
+}
+
+.account-info dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.account-info dd {
+  margin: 0;
+  font-weight: 700;
+}
+
 @media (max-width: 760px) {
   .landing-hero {
     min-height: 620px;

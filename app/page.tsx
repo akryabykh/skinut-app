@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CheckCircle2, ReceiptText, Share2, UsersRound } from "lucide-react";
 import { Brand } from "@/components/brand";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -27,15 +28,29 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     redirect(`/app?data=${encodeURIComponent(data)}`);
   }
 
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const isAuthenticated = Boolean(user);
+
   return (
     <main className="landing-page">
       <header className="landing-header">
         <Brand />
         <nav className="landing-nav" aria-label="Основная навигация">
-          <Link href="/auth/sign-in">Войти</Link>
-          <Link className="nav-button" href="/auth/sign-up">
-            Регистрация
-          </Link>
+          {isAuthenticated ? (
+            <Link className="nav-button" href="/account">
+              Личный кабинет
+            </Link>
+          ) : (
+            <>
+              <Link href="/auth/sign-in">Войти</Link>
+              <Link className="nav-button" href="/auth/sign-up">
+                Регистрация
+              </Link>
+            </>
+          )}
         </nav>
       </header>
 
@@ -62,11 +77,14 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             Добавляйте участников, фиксируйте покупки и сразу получайте простой список переводов: кто кому и сколько должен.
           </p>
           <div className="hero-actions">
-            <Link className="primary-button hero-button" href="/app">
-              Старт
+            <Link
+              className="primary-button hero-button"
+              href={isAuthenticated ? "/app" : "/auth/sign-up"}
+            >
+              {isAuthenticated ? "К моим расходам" : "Старт"}
             </Link>
-            <Link className="ghost-button hero-button" href="/auth/sign-up">
-              Создать аккаунт позже
+            <Link className="ghost-button hero-button" href="/app">
+              Открыть калькулятор
             </Link>
           </div>
         </div>
