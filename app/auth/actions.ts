@@ -4,20 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { publicConfig } from "@/lib/public-config";
-
-// Form state shared by sign-in and sign-up pages.
-// Consumed by useActionState() in the client components.
-export type AuthFormState = {
-  status: "idle" | "error" | "needs_confirmation";
-  message: string | null;
-  fieldErrors: Record<string, string>;
-};
-
-export const emptyAuthFormState: AuthFormState = {
-  status: "idle",
-  message: null,
-  fieldErrors: {},
-};
+import type { AuthFormState } from "./state";
 
 const signUpSchema = z.object({
   email: z.string().email("Введите корректный email"),

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
-import { signIn, emptyAuthFormState } from "../actions";
+import { signIn } from "../actions";
+import { emptyAuthFormState } from "../state";
 
 export function SignInForm() {
   const [state, formAction, pending] = useActionState(signIn, emptyAuthFormState);
