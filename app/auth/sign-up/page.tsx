@@ -1,17 +1,26 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Brand } from "@/components/brand";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SignUpForm } from "./sign-up-form";
 
-export default function SignUpPlaceholderPage() {
+export default async function SignUpPage() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    redirect("/account");
+  }
+
   return (
     <main className="placeholder-page">
       <Brand />
       <section className="placeholder-panel">
-        <p className="eyebrow">Следующий блок</p>
-        <h1>Регистрация будет подключена отдельно</h1>
-        <p>На следующем этапе добавим email OTP через Supabase: письмо с кодом, имя, пароль и профиль пользователя.</p>
-        <Link className="primary-button hero-button" href="/app">
-          Пока начать без аккаунта
-        </Link>
+        <p className="eyebrow">Регистрация</p>
+        <h1>Создайте аккаунт</h1>
+        <p>Аккаунт нужен, чтобы сохранять проекты и историю трат на ваших устройствах.</p>
+        <SignUpForm />
       </section>
     </main>
   );
