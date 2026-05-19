@@ -1,9 +1,17 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Receipt, Share2, Users, WalletCards } from "lucide-react";
-import { publicConfig } from "@/lib/public-config";
+import Link from "next/link";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { FolderOpen, ListChecks, Receipt, Users, WalletCards } from "lucide-react";
+import { saveProjectPayload } from "@/app/app/projects/actions";
 import {
   calculatePersonalCosts,
   calculateTransfers,
@@ -12,26 +20,35 @@ import {
   type Person,
 } from "@/lib/split-calculator";
 
-type ExpenseSort = "created-desc" | "name-asc" | "name-desc" | "payer-asc" | "payer-desc";
+type ExpenseSort =
+  | "created-desc"
+  | "name-asc"
+  | "name-desc"
+  | "payer-asc"
+  | "payer-desc";
 
 type ProjectState = {
-  projectId: string | null;
   projectName: string;
   expenseSort: ExpenseSort;
   people: Person[];
   expenses: Expense[];
 };
 
-type RemoteConfig = {
-  enabled: boolean;
-  url: string;
-  anonKey: string;
-  publicBaseUrl: string;
+type ExpenseCalculatorProps = {
+  // When a project is loaded from the DB, the parent server component
+  // passes its id, initial title and payload here. The calculator then
+  // persists every change back to that row via saveProjectPayload().
+  //
+  // When the props are omitted (guest mode, no auth), the calculator
+  // falls back to localStorage just like the legacy version.
+  projectId?: string;
+  initialName?: string;
+  initialPayload?: Partial<ProjectState>;
 };
 
 const STORAGE_KEY = "split-app-state-v1";
+
 const DEFAULT_STATE: ProjectState = {
-  projectId: null,
   projectName: "Событие",
   expenseSort: "created-desc",
   people: [],
@@ -52,337 +69,218 @@ function plural(count: number, one: string, few: string, many: string) {
   const mod10 = count % 10;
   const mod100 = count % 100;
 
-  if (mod10 === 1 && mod100 !== 11) {
-    return one;
-  }
-
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return few;
-  }
-
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
   return many;
 }
 
 function makeId() {
-  if ("crypto" in window && "randomUUID" in window.crypto) {
+  if (typeof window !== "undefined" && "crypto" in window && "randomUUID" in window.crypto) {
     return window.crypto.randomUUID();
   }
-
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function makeProjectId() {
-  return makeId().replaceAll("-", "").slice(0, 16);
-}
-
 function getValidExpenseSort(value: unknown): ExpenseSort {
-  const allowed: ExpenseSort[] = ["created-desc", "name-asc", "name-desc", "payer-asc", "payer-desc"];
+  const allowed: ExpenseSort[] = [
+    "created-desc",
+    "name-asc",
+    "name-desc",
+    "payer-asc",
+    "payer-desc",
+  ];
   return allowed.includes(value as ExpenseSort) ? (value as ExpenseSort) : "created-desc";
 }
 
-function normalizeState(value: Partial<ProjectState>): ProjectState {
+function normalizeState(value: Partial<ProjectState> | null | undefined): ProjectState {
+  const v = value ?? {};
   return {
-    projectId: typeof value.projectId === "string" && value.projectId.trim() ? value.projectId : null,
-    projectName: typeof value.projectName === "string" && value.projectName.trim() ? value.projectName : "Событие",
-    expenseSort: getValidExpenseSort(value.expenseSort),
-    people: Array.isArray(value.people) ? value.people.filter((person) => person.id && person.name) : [],
-    expenses: Array.isArray(value.expenses)
-      ? value.expenses.filter((expense) => expense.id && expense.name && expense.payerId && Number(expense.amount) > 0)
+    projectName:
+      typeof v.projectName === "string" && v.projectName.trim()
+        ? v.projectName
+        : DEFAULT_STATE.projectName,
+    expenseSort: getValidExpenseSort(v.expenseSort),
+    people: Array.isArray(v.people)
+      ? v.people.filter((p) => p && p.id && p.name)
+      : [],
+    expenses: Array.isArray(v.expenses)
+      ? v.expenses.filter(
+          (e) => e && e.id && e.name && e.payerId && Number(e.amount) > 0,
+        )
       : [],
   };
-}
-
-function getRemoteConfig(): RemoteConfig {
-  const url = publicConfig.supabaseUrl.replace(/\/$/, "");
-  const anonKey = publicConfig.supabaseAnonKey;
-  const publicBaseUrl = publicConfig.publicBaseUrl.replace(/\/$/, "");
-
-  return {
-    enabled: Boolean(url && anonKey),
-    url,
-    anonKey,
-    publicBaseUrl,
-  };
-}
-
-function getProjectIdFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("project") || params.get("p");
-}
-
-function setProjectIdInUrl(projectId: string) {
-  const url = new URL(window.location.href);
-  url.searchParams.delete("data");
-  url.searchParams.set("project", projectId);
-  window.history.replaceState({}, "", url);
-}
-
-function makeProjectUrl(paramName: string, value: string, remote: RemoteConfig) {
-  const baseUrl = remote.publicBaseUrl || `${window.location.origin}/app`;
-  const url = new URL(baseUrl);
-  url.pathname = "/app";
-  url.searchParams.set(paramName, value);
-  return url.toString();
-}
-
-function getPayload(state: ProjectState) {
-  return {
-    projectName: state.projectName,
-    expenseSort: state.expenseSort,
-    people: state.people,
-    expenses: state.expenses,
-  };
-}
-
-function getRemoteHeaders(remote: RemoteConfig, extra: Record<string, string> = {}) {
-  return {
-    apikey: remote.anonKey,
-    Authorization: `Bearer ${remote.anonKey}`,
-    ...extra,
-  };
-}
-
-async function fetchRemoteProject(projectId: string, remote: RemoteConfig): Promise<Partial<ProjectState> | null> {
-  try {
-    const response = await fetch(
-      `${remote.url}/rest/v1/projects?public_id=eq.${encodeURIComponent(projectId)}&select=public_id,name,payload`,
-      {
-        headers: getRemoteHeaders(remote),
-      },
-    );
-
-    if (!response.ok) {
-      throw new Error(`Supabase returned ${response.status}`);
-    }
-
-    const rows = (await response.json()) as Array<{ payload?: Partial<ProjectState> }>;
-    return rows[0]?.payload ?? null;
-  } catch (error) {
-    console.warn("Unable to load remote project", error);
-    return null;
-  }
-}
-
-async function saveRemoteProject(state: ProjectState, remote: RemoteConfig) {
-  if (!remote.enabled || !state.projectId) {
-    return null;
-  }
-
-  const response = await fetch(`${remote.url}/rest/v1/projects?on_conflict=public_id`, {
-    method: "POST",
-    headers: getRemoteHeaders(remote, {
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates",
-    }),
-    body: JSON.stringify({
-      public_id: state.projectId,
-      name: state.projectName,
-      payload: getPayload(state),
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Supabase returned ${response.status}`);
-  }
-
-  return state.projectId;
 }
 
 function compareText(first: string, second: string) {
   return first.localeCompare(second, "ru", { sensitivity: "base" });
 }
 
-function encodeState(state: ProjectState) {
-  return btoa(unescape(encodeURIComponent(JSON.stringify(state))));
-}
+export function ExpenseCalculator({
+  projectId,
+  initialName,
+  initialPayload,
+}: ExpenseCalculatorProps = {}) {
+  const isOwnedProject = Boolean(projectId);
 
-function decodeState(value: string) {
-  return JSON.parse(decodeURIComponent(escape(atob(value)))) as Partial<ProjectState>;
-}
+  const [state, setState] = useState<ProjectState>(() => {
+    if (isOwnedProject) {
+      // Server-provided initial data — render with it on the first paint.
+      return normalizeState({
+        ...(initialPayload ?? {}),
+        projectName: initialName ?? initialPayload?.projectName,
+      });
+    }
+    return DEFAULT_STATE;
+  });
 
-export function ExpenseCalculator() {
-  const [state, setState] = useState<ProjectState>(DEFAULT_STATE);
   const [personName, setPersonName] = useState("");
   const [expenseName, setExpenseName] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expensePayer, setExpensePayer] = useState("");
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
-  const [isReady, setIsReady] = useState(false);
-  const remote = useMemo(getRemoteConfig, []);
-  const remoteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Owned projects render with server data immediately, guests need to
+  // hydrate from localStorage first.
+  const [isReady, setIsReady] = useState(isOwnedProject);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const peopleIds = useMemo(() => state.people.map((person) => person.id), [state.people]);
+  const peopleIds = useMemo(() => state.people.map((p) => p.id), [state.people]);
   const peopleIdsKey = peopleIds.join("|");
 
+  // Guest mode: load saved state from localStorage on mount.
   useEffect(() => {
-    let isMounted = true;
+    if (isOwnedProject) return;
 
-    async function loadState() {
-      const projectId = getProjectIdFromUrl();
-
-      if (projectId && remote.enabled) {
-        const remoteState = await fetchRemoteProject(projectId, remote);
-        if (remoteState && isMounted) {
-          const nextState = normalizeState({ ...remoteState, projectId });
-          setState(nextState);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-          setIsReady(true);
-          return;
-        }
-      }
-
-      const sharedState = new URLSearchParams(window.location.search).get("data");
-
-      if (sharedState) {
-        try {
-          const nextState = normalizeState(decodeState(sharedState));
-          if (isMounted) {
-            setState(nextState);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-            window.history.replaceState({}, "", window.location.pathname);
-            setIsReady(true);
-          }
-          return;
-        } catch (error) {
-          console.warn("Unable to read shared project data", error);
-        }
-      }
-
+    try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) {
-        if (projectId && isMounted) {
-          setState({ ...DEFAULT_STATE, projectId });
-        }
-        if (isMounted) {
-          setIsReady(true);
-        }
-        return;
+      if (saved) {
+        setState(normalizeState(JSON.parse(saved) as Partial<ProjectState>));
       }
-
-      try {
-        const nextState = normalizeState(JSON.parse(saved) as Partial<ProjectState>);
-        if (projectId) {
-          nextState.projectId = projectId;
-        }
-        if (isMounted) {
-          setState(nextState);
-        }
-      } catch (error) {
-        console.warn("Unable to read saved project data", error);
-      }
-
-      if (isMounted) {
-        setIsReady(true);
-      }
+    } catch (error) {
+      console.warn("Unable to read saved project data", error);
     }
-
-    void loadState();
+    setIsReady(true);
 
     return () => {
-      isMounted = false;
-      if (remoteSaveTimer.current) {
-        clearTimeout(remoteSaveTimer.current);
-      }
+      if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [remote]);
+  }, [isOwnedProject]);
 
+  // Keep selectedParticipantIds and expensePayer in sync with the
+  // current people list (drop removed people, default to "everyone").
   useEffect(() => {
-    setSelectedParticipantIds((previousSelection) => {
-      const validSelection = previousSelection.filter((id) => peopleIds.includes(id));
-      return validSelection.length ? validSelection : peopleIds;
+    setSelectedParticipantIds((prev) => {
+      const valid = prev.filter((id) => peopleIds.includes(id));
+      return valid.length ? valid : peopleIds;
     });
-
-    setExpensePayer((currentPayer) => (currentPayer && peopleIds.includes(currentPayer) ? currentPayer : ""));
+    setExpensePayer((current) =>
+      current && peopleIds.includes(current) ? current : "",
+    );
   }, [peopleIdsKey, peopleIds]);
 
-  function scheduleRemoteSave(nextState: ProjectState) {
-    if (!remote.enabled) {
-      return;
-    }
-
-    if (remoteSaveTimer.current) {
-      clearTimeout(remoteSaveTimer.current);
-    }
-
-    remoteSaveTimer.current = setTimeout(() => {
-      saveRemoteProject(nextState, remote).catch((error: unknown) => console.warn("Unable to save remote project", error));
-    }, 450);
-  }
+  // Persist current state — debounced server-action save for owned
+  // projects, synchronous localStorage for guests.
+  const persistState = useCallback(
+    (nextState: ProjectState) => {
+      if (isOwnedProject && projectId) {
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          saveProjectPayload(projectId, nextState).catch((error: unknown) => {
+            console.warn("Unable to save project", error);
+          });
+        }, 600);
+      } else {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+        } catch (error) {
+          console.warn("Unable to save project", error);
+        }
+      }
+    },
+    [isOwnedProject, projectId],
+  );
 
   function commitState(nextState: ProjectState) {
-    let stateToSave = nextState;
-
-    if (remote.enabled && !stateToSave.projectId) {
-      const projectId = makeProjectId();
-      stateToSave = { ...stateToSave, projectId };
-      setProjectIdInUrl(projectId);
-    }
-
-    setState(stateToSave);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
-    scheduleRemoteSave(stateToSave);
+    setState(nextState);
+    persistState(nextState);
   }
 
   const getPersonName = useCallback(
-    (personId: string) => state.people.find((person) => person.id === personId)?.name ?? "Неизвестно",
+    (personId: string) =>
+      state.people.find((p) => p.id === personId)?.name ?? "Неизвестно",
     [state.people],
   );
 
   const sortedExpenses = useMemo(() => {
-    const indexedExpenses = state.expenses.map((expense, index) => ({ expense, index }));
+    const indexed = state.expenses.map((expense, index) => ({ expense, index }));
 
-    indexedExpenses.sort((first, second) => {
+    indexed.sort((a, b) => {
       if (state.expenseSort === "name-asc") {
-        return compareText(first.expense.name, second.expense.name) || first.index - second.index;
+        return compareText(a.expense.name, b.expense.name) || a.index - b.index;
       }
       if (state.expenseSort === "name-desc") {
-        return compareText(second.expense.name, first.expense.name) || first.index - second.index;
+        return compareText(b.expense.name, a.expense.name) || a.index - b.index;
       }
       if (state.expenseSort === "payer-asc") {
-        return compareText(getPersonName(first.expense.payerId), getPersonName(second.expense.payerId)) || first.index - second.index;
+        return (
+          compareText(getPersonName(a.expense.payerId), getPersonName(b.expense.payerId)) ||
+          a.index - b.index
+        );
       }
       if (state.expenseSort === "payer-desc") {
-        return compareText(getPersonName(second.expense.payerId), getPersonName(first.expense.payerId)) || first.index - second.index;
+        return (
+          compareText(getPersonName(b.expense.payerId), getPersonName(a.expense.payerId)) ||
+          a.index - b.index
+        );
       }
-
-      return first.index - second.index;
+      return a.index - b.index;
     });
 
-    return indexedExpenses.map(({ expense }) => expense);
+    return indexed.map(({ expense }) => expense);
   }, [getPersonName, state.expenseSort, state.expenses]);
 
-  const transfers = useMemo(() => calculateTransfers(state.people, state.expenses), [state.people, state.expenses]);
-  const personalCosts = useMemo(() => calculatePersonalCosts(state.people, state.expenses), [state.people, state.expenses]);
+  const transfers = useMemo(
+    () => calculateTransfers(state.people, state.expenses),
+    [state.people, state.expenses],
+  );
+  const personalCosts = useMemo(
+    () => calculatePersonalCosts(state.people, state.expenses),
+    [state.people, state.expenses],
+  );
   const totalAmount = useMemo(() => getTotalAmount(state.expenses), [state.expenses]);
 
   function addPerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const cleanName = personName.trim();
-    if (!cleanName) {
-      return;
-    }
+    if (!cleanName) return;
 
-    const exists = state.people.some((person) => person.name.toLowerCase() === cleanName.toLowerCase());
+    const exists = state.people.some(
+      (p) => p.name.toLowerCase() === cleanName.toLowerCase(),
+    );
     if (exists) {
       alert("Такой участник уже есть");
       return;
     }
 
-    commitState({ ...state, people: [...state.people, { id: makeId(), name: cleanName }] });
+    commitState({
+      ...state,
+      people: [...state.people, { id: makeId(), name: cleanName }],
+    });
     setPersonName("");
   }
 
   function removePerson(personId: string) {
     const isUsed = state.expenses.some(
-      (expense) => expense.payerId === personId || expense.participantIds.includes(personId),
+      (e) => e.payerId === personId || e.participantIds.includes(personId),
     );
-
     if (isUsed) {
       alert("Участник уже есть в расходах. Сначала удалите связанные расходы.");
       return;
     }
 
-    commitState({ ...state, people: state.people.filter((person) => person.id !== personId) });
+    commitState({
+      ...state,
+      people: state.people.filter((p) => p.id !== personId),
+    });
   }
 
   function addExpense(event: FormEvent<HTMLFormElement>) {
@@ -393,21 +291,17 @@ export function ExpenseCalculator() {
       alert("Сначала добавьте участников.");
       return;
     }
-
     if (!selectedParticipantIds.length) {
       alert("Выберите хотя бы одного участника расхода.");
       return;
     }
-
     if (!expensePayer) {
       alert("Выберите, кто оплатил расход.");
       return;
     }
 
     const cleanExpenseName = expenseName.trim();
-    if (!cleanExpenseName || Number.isNaN(amount) || amount <= 0) {
-      return;
-    }
+    if (!cleanExpenseName || Number.isNaN(amount) || amount <= 0) return;
 
     commitState({
       ...state,
@@ -427,11 +321,14 @@ export function ExpenseCalculator() {
     setExpenseName("");
     setExpenseAmount("");
     setExpensePayer("");
-    setSelectedParticipantIds(state.people.map((person) => person.id));
+    setSelectedParticipantIds(state.people.map((p) => p.id));
   }
 
   function removeExpense(expenseId: string) {
-    commitState({ ...state, expenses: state.expenses.filter((expense) => expense.id !== expenseId) });
+    commitState({
+      ...state,
+      expenses: state.expenses.filter((e) => e.id !== expenseId),
+    });
   }
 
   function changeSort(value: string) {
@@ -439,20 +336,9 @@ export function ExpenseCalculator() {
   }
 
   function resetProject() {
-    if (!confirm("Очистить весь расчет?")) {
-      return;
-    }
+    if (!confirm("Очистить весь расчет?")) return;
 
-    const nextState: ProjectState = {
-      ...DEFAULT_STATE,
-      projectId: remote.enabled ? makeProjectId() : null,
-    };
-
-    if (nextState.projectId) {
-      setProjectIdInUrl(nextState.projectId);
-    }
-
-    commitState(nextState);
+    commitState({ ...DEFAULT_STATE });
     setPersonName("");
     setExpenseName("");
     setExpenseAmount("");
@@ -462,38 +348,10 @@ export function ExpenseCalculator() {
 
   function toggleParticipant(personId: string) {
     setSelectedParticipantIds((current) =>
-      current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId],
+      current.includes(personId)
+        ? current.filter((id) => id !== personId)
+        : [...current, personId],
     );
-  }
-
-  async function shareProject() {
-    let nextState = state;
-
-    if (remote.enabled && !nextState.projectId) {
-      const projectId = makeProjectId();
-      nextState = { ...nextState, projectId };
-      setProjectIdInUrl(projectId);
-      commitState(nextState);
-    }
-
-    let url: string;
-
-    if (remote.enabled && nextState.projectId) {
-      await saveRemoteProject(nextState, remote);
-      url = makeProjectUrl("project", nextState.projectId, remote);
-    } else {
-      url = makeProjectUrl("data", encodeState(nextState), remote);
-    }
-
-    const text = `Расчет "${nextState.projectName}"`;
-
-    if (navigator.share) {
-      await navigator.share({ title: "Скинуться", text, url });
-      return;
-    }
-
-    await navigator.clipboard.writeText(url);
-    alert("Ссылка скопирована.");
   }
 
   return (
@@ -502,13 +360,27 @@ export function ExpenseCalculator() {
         <div>
           <p className="eyebrow">Калькулятор расходов</p>
           <h1 className="app-title">
-            <Image src="/logo.svg" alt="" width={38} height={38} className="brand-mark" priority />
+            <Image
+              src="/logo.svg"
+              alt=""
+              width={38}
+              height={38}
+              className="brand-mark"
+              priority
+            />
             Скинуться
           </h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Поделиться расчетом" onClick={() => void shareProject()}>
-          <Share2 size={21} aria-hidden="true" />
-        </button>
+        {isOwnedProject ? (
+          <Link
+            href="/app/projects"
+            className="nav-button calc-nav-link"
+            aria-label="Мои проекты"
+          >
+            <FolderOpen size={18} aria-hidden="true" />
+            <span>Проекты</span>
+          </Link>
+        ) : null}
       </header>
 
       <section className="project-panel" aria-labelledby="projectTitleLabel">
@@ -521,7 +393,12 @@ export function ExpenseCalculator() {
           type="text"
           autoComplete="off"
           value={state.projectName}
-          onChange={(event) => commitState({ ...state, projectName: event.target.value.trim() || "Событие" })}
+          onChange={(event) =>
+            commitState({
+              ...state,
+              projectName: event.target.value.trim() || DEFAULT_STATE.projectName,
+            })
+          }
           disabled={!isReady}
         />
       </section>
@@ -536,7 +413,8 @@ export function ExpenseCalculator() {
               Участники
             </h2>
             <p>
-              {state.people.length} {plural(state.people.length, "человек", "человека", "человек")}
+              {state.people.length}{" "}
+              {plural(state.people.length, "человек", "человека", "человек")}
             </p>
           </div>
         </div>
@@ -551,9 +429,7 @@ export function ExpenseCalculator() {
             required
           />
           <button className="primary-button" type="submit">
-            <span className="button-icon" aria-hidden="true">
-              +
-            </span>
+            <span className="button-icon" aria-hidden="true">+</span>
             Добавить
           </button>
         </form>
@@ -567,7 +443,11 @@ export function ExpenseCalculator() {
             state.people.map((person) => (
               <div className="chip" key={person.id}>
                 <span>{person.name}</span>
-                <button type="button" aria-label={`Удалить ${person.name}`} onClick={() => removePerson(person.id)}>
+                <button
+                  type="button"
+                  aria-label={`Удалить ${person.name}`}
+                  onClick={() => removePerson(person.id)}
+                >
                   ×
                 </button>
               </div>
@@ -622,7 +502,9 @@ export function ExpenseCalculator() {
                 onChange={(event) => setExpensePayer(event.target.value)}
                 required
               >
-                <option value="">{state.people.length ? "Выберите" : "Сначала добавьте людей"}</option>
+                <option value="">
+                  {state.people.length ? "Выберите" : "Сначала добавьте людей"}
+                </option>
                 {state.people.map((person) => (
                   <option key={person.id} value={person.id}>
                     {person.name}
@@ -634,10 +516,20 @@ export function ExpenseCalculator() {
           <fieldset className="participants-box">
             <legend>Кто участвует</legend>
             <div className="payer-actions">
-              <button className="ghost-button" type="button" onClick={() => setSelectedParticipantIds(state.people.map((person) => person.id))}>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() =>
+                  setSelectedParticipantIds(state.people.map((p) => p.id))
+                }
+              >
                 Все
               </button>
-              <button className="ghost-button" type="button" onClick={() => setSelectedParticipantIds([])}>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setSelectedParticipantIds([])}
+              >
                 Никто
               </button>
             </div>
@@ -663,9 +555,7 @@ export function ExpenseCalculator() {
             </div>
           </fieldset>
           <button className="primary-button full-width" type="submit">
-            <span className="button-icon" aria-hidden="true">
-              +
-            </span>
+            <span className="button-icon" aria-hidden="true">+</span>
             Добавить расход
           </button>
         </form>
@@ -681,7 +571,8 @@ export function ExpenseCalculator() {
               Расходы
             </h2>
             <p>
-              {state.expenses.length} {plural(state.expenses.length, "запись", "записи", "записей")}
+              {state.expenses.length}{" "}
+              {plural(state.expenses.length, "запись", "записи", "записей")}
             </p>
           </div>
           <button className="ghost-button danger" type="button" onClick={resetProject}>
@@ -718,13 +609,19 @@ export function ExpenseCalculator() {
                   <strong>{expense.name}</strong>
                   <div className="expense-main">
                     <span className="money">{money(expense.amount)}</span>
-                    <button className="expense-remove" type="button" aria-label={`Удалить ${expense.name}`} onClick={() => removeExpense(expense.id)}>
+                    <button
+                      className="expense-remove"
+                      type="button"
+                      aria-label={`Удалить ${expense.name}`}
+                      onClick={() => removeExpense(expense.id)}
+                    >
                       ×
                     </button>
                   </div>
                 </div>
                 <p className="meta">
-                  Оплатил: {getPersonName(expense.payerId)}. Участвуют: {expense.participantIds.map(getPersonName).join(", ")}.
+                  Оплатил: {getPersonName(expense.payerId)}. Участвуют:{" "}
+                  {expense.participantIds.map(getPersonName).join(", ")}.
                 </p>
               </article>
             ))
@@ -757,7 +654,10 @@ export function ExpenseCalculator() {
             </div>
           ) : (
             transfers.map((transfer) => (
-              <article className="summary-item" key={`${transfer.from}-${transfer.to}-${transfer.amount}`}>
+              <article
+                className="summary-item"
+                key={`${transfer.from}-${transfer.to}-${transfer.amount}`}
+              >
                 <div className="summary-main">
                   <strong>
                     {getPersonName(transfer.from)} → {getPersonName(transfer.to)}
@@ -775,14 +675,17 @@ export function ExpenseCalculator() {
           </summary>
           <div className="details-content">
             <p className="details-total">
-              <strong>Всего потрачено денег:</strong> <span>{money(totalAmount)}</span>
+              <strong>Всего потрачено денег:</strong>{" "}
+              <span>{money(totalAmount)}</span>
             </p>
             <h3>Стоимость для каждого:</h3>
             <div className="person-cost-list">
               {!personalCosts.length ? (
                 <div className="empty-state">
                   <strong>Нет участников</strong>
-                  <span>Добавьте людей и расходы, чтобы увидеть стоимость для каждого.</span>
+                  <span>
+                    Добавьте людей и расходы, чтобы увидеть стоимость для каждого.
+                  </span>
                 </div>
               ) : (
                 personalCosts.map((cost) => (
