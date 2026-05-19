@@ -100,6 +100,10 @@ export async function deleteProject(formData: FormData) {
 // Save the calculator's JSON state into the project row.
 // Called from the client component on debounced state changes.
 // Returns the new updated_at so the client can show "saved at".
+//
+// If payload contains projectName (which the calculator writes into it),
+// it's also mirrored into the row's `name` column. That keeps the list
+// view at /app/projects in sync with the title shown inside the calc.
 export async function saveProjectPayload(
   id: string,
   payload: unknown,
@@ -110,9 +114,21 @@ export async function saveProjectPayload(
 
   const { supabase } = await requireUser();
 
+  const update: { payload: unknown; name?: string } = { payload };
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "projectName" in payload
+  ) {
+    const candidate = (payload as { projectName: unknown }).projectName;
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      update.name = candidate.trim();
+    }
+  }
+
   const { data, error } = await supabase
     .from("app_projects")
-    .update({ payload: payload as never })
+    .update(update as never)
     .eq("id", id)
     .select("updated_at")
     .single();

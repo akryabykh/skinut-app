@@ -874,6 +874,18 @@ h2 {
   font-size: 0.9rem;
 }
 
+.calc-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--brand);
+}
+
+.calc-nav-link svg {
+  width: 18px;
+  height: 18px;
+}
+
 @media (max-width: 760px) {
   .landing-hero {
     min-height: 620px;
