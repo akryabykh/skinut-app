@@ -36,23 +36,26 @@ export type Database = {
         };
         Relationships: [];
       };
-      projects: {
+      app_projects: {
         Row: {
-          public_id: string;
+          id: string;
+          owner_id: string;
           name: string;
           payload: Json;
           created_at: string;
           updated_at: string;
         };
         Insert: {
-          public_id: string;
+          id?: string;
+          owner_id: string;
           name?: string;
           payload?: Json;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
-          public_id?: string;
+          id?: string;
+          owner_id?: string;
           name?: string;
           payload?: Json;
           created_at?: string;
