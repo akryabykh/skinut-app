@@ -1,33 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { CheckCircle2, ReceiptText, Share2, UsersRound } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-type HomePageProps = {
-  searchParams?: Promise<SearchParams>;
-};
-
-function firstParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function HomePage({ searchParams }: HomePageProps) {
-  const params: SearchParams = searchParams ? await searchParams : {};
-  const project = firstParam(params.project) || firstParam(params.p);
-  const data = firstParam(params.data);
-
-  if (project) {
-    redirect(`/app?project=${encodeURIComponent(project)}`);
-  }
-
-  if (data) {
-    redirect(`/app?data=${encodeURIComponent(data)}`);
-  }
-
+export default async function HomePage() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -40,9 +17,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         <Brand />
         <nav className="landing-nav" aria-label="Основная навигация">
           {isAuthenticated ? (
-            <Link className="nav-button" href="/account">
-              Личный кабинет
-            </Link>
+            <>
+              <Link href="/app/projects">Мои проекты</Link>
+              <Link className="nav-button" href="/account">
+                Личный кабинет
+              </Link>
+            </>
           ) : (
             <>
               <Link href="/auth/sign-in">Войти</Link>
@@ -79,9 +59,9 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <div className="hero-actions">
             <Link
               className="primary-button hero-button"
-              href={isAuthenticated ? "/app" : "/auth/sign-up"}
+              href={isAuthenticated ? "/app/projects" : "/auth/sign-up"}
             >
-              {isAuthenticated ? "К моим расходам" : "Старт"}
+              {isAuthenticated ? "Мои проекты" : "Старт"}
             </Link>
             <Link className="ghost-button hero-button" href="/app">
               Открыть калькулятор

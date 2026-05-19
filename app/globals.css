@@ -822,6 +822,70 @@ h2 {
   font-weight: 700;
 }
 
+.projects-create {
+  margin: 8px 0 4px;
+}
+
+.projects-list {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.projects-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.projects-link {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.projects-link strong {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-link .meta {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.projects-delete {
+  margin: 0;
+}
+
+.projects-delete-button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 0.9rem;
+}
+
+.calc-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--brand);
+}
+
+.calc-nav-link svg {
+  width: 18px;
+  height: 18px;
+}
+
 @media (max-width: 760px) {
   .landing-hero {
     min-height: 620px;

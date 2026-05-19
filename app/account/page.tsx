@@ -27,8 +27,8 @@ export default async function AccountPage() {
     <main className="placeholder-page">
       <header className="topbar">
         <Brand />
-        <Link href="/app" className="nav-button">
-          Калькулятор
+        <Link href="/app/projects" className="nav-button">
+          Мои проекты
         </Link>
       </header>
 
