@@ -886,6 +886,33 @@ h2 {
   height: 18px;
 }
 
+.account-divider {
+  margin: 18px 0 4px;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.account-signout {
+  margin-top: 4px;
+}
+
+.danger-zone {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.danger-zone h2 {
+  font-size: 1.05rem;
+  color: var(--danger);
+}
+
+.danger-zone p {
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
 @media (max-width: 760px) {
   .landing-hero {
     min-height: 620px;
