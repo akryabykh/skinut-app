@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Brand } from "@/components/brand";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signOut } from "../auth/actions";
+import { AccountForm } from "./account-form";
 
 export default async function AccountPage() {
   const supabase = await createSupabaseServerClient();
@@ -20,7 +21,11 @@ export default async function AccountPage() {
     .eq("id", user.id)
     .maybeSingle();
 
-  const fallbackName = user.email ? user.email.split("@")[0] : "Пользователь";
+  const email = user.email ?? "—";
+  const fallbackName =
+    user.email && user.email.includes("@")
+      ? user.email.split("@")[0]
+      : "Пользователь";
   const displayName = profile?.display_name ?? fallbackName;
 
   return (
@@ -35,24 +40,18 @@ export default async function AccountPage() {
       <section className="placeholder-panel">
         <p className="eyebrow">Личный кабинет</p>
         <h1>Здравствуйте, {displayName}</h1>
-        <p>
-          Скоро здесь появятся ваши проекты и история трат. Пока что вы можете
-          пользоваться калькулятором как раньше — он сохраняет данные локально.
-        </p>
 
         <dl className="account-info">
           <div>
             <dt>Email</dt>
-            <dd>{user.email ?? "—"}</dd>
-          </div>
-          <div>
-            <dt>Имя</dt>
-            <dd>{profile?.display_name ?? "—"}</dd>
+            <dd>{email}</dd>
           </div>
         </dl>
 
-        <form action={signOut}>
-          <button type="submit" className="ghost-button hero-button danger">
+        <AccountForm initialDisplayName={displayName} email={email} />
+
+        <form action={signOut} className="account-signout">
+          <button type="submit" className="ghost-button hero-button">
             Выйти из аккаунта
           </button>
         </form>
