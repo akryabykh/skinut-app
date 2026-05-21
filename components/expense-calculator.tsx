@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { FolderOpen, ListChecks, Receipt, Users, WalletCards } from "lucide-react";
+import { ListChecks, Receipt, Settings, Users, WalletCards } from "lucide-react";
 import { saveProjectPayload } from "@/app/app/projects/actions";
 import {
   calculatePersonalCosts,
@@ -44,6 +44,10 @@ type ExpenseCalculatorProps = {
   projectId?: string;
   initialName?: string;
   initialPayload?: Partial<ProjectState>;
+  // Defaults to true for backward compatibility. Set to false when the
+  // current user has the "viewer" role on this project — the UI becomes
+  // a read-only snapshot and persistState becomes a noop.
+  canEdit?: boolean;
 };
 
 const STORAGE_KEY = "split-app-state-v1";
@@ -119,8 +123,10 @@ export function ExpenseCalculator({
   projectId,
   initialName,
   initialPayload,
+  canEdit = true,
 }: ExpenseCalculatorProps = {}) {
   const isOwnedProject = Boolean(projectId);
+  const isReadOnly = !canEdit;
 
   const [state, setState] = useState<ProjectState>(() => {
     if (isOwnedProject) {
@@ -181,6 +187,10 @@ export function ExpenseCalculator({
   // projects, synchronous localStorage for guests.
   const persistState = useCallback(
     (nextState: ProjectState) => {
+      // Viewers don't get to write. Their UI is already disabled via the
+      // <fieldset disabled> wrapper below, but this is the second layer.
+      if (isReadOnly) return;
+
       if (isOwnedProject && projectId) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
@@ -196,7 +206,7 @@ export function ExpenseCalculator({
         }
       }
     },
-    [isOwnedProject, projectId],
+    [isOwnedProject, projectId, isReadOnly],
   );
 
   function commitState(nextState: ProjectState) {
@@ -371,18 +381,26 @@ export function ExpenseCalculator({
             Скинуться
           </h1>
         </div>
-        {isOwnedProject ? (
+        {isOwnedProject && projectId ? (
           <Link
-            href="/app/projects"
+            href={`/app/projects/${projectId}`}
             className="nav-button calc-nav-link"
-            aria-label="Мои проекты"
+            aria-label="Настройки проекта"
           >
-            <FolderOpen size={18} aria-hidden="true" />
-            <span>Проекты</span>
+            <Settings size={18} aria-hidden="true" />
+            <span>Настройки</span>
           </Link>
         ) : null}
       </header>
 
+      {isReadOnly ? (
+        <p className="auth-banner auth-banner-success calc-readonly-banner">
+          Режим просмотра — изменения не сохраняются. Попросите владельца
+          сделать вас редактором.
+        </p>
+      ) : null}
+
+      <fieldset className="calc-fieldset" disabled={isReadOnly}>
       <section className="project-panel" aria-labelledby="projectTitleLabel">
         <label className="field-label" id="projectTitleLabel" htmlFor="projectName">
           Название
@@ -699,6 +717,7 @@ export function ExpenseCalculator({
           </div>
         </details>
       </section>
+      </fieldset>
     </main>
   );
 }

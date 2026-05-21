@@ -26,31 +26,40 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   } = await supabase.auth.getUser();
 
   // Tried to open a project link without auth — fall back to guest mode.
-  // (Could also redirect to /auth/sign-in?next=... — defer that decision.)
   if (!user) {
     return <ExpenseCalculator />;
   }
 
-  // RLS will also enforce this, but we pass owner_id explicitly for clarity.
+  // RLS filters by membership now; if the user isn't a member we get null.
   const { data: project } = await supabase
     .from("app_projects")
     .select("id, name, payload")
     .eq("id", projectId)
-    .eq("owner_id", user.id)
     .maybeSingle();
 
   if (!project) {
-    // Not found or belongs to a different user — render empty calculator.
     return <ExpenseCalculator />;
   }
+
+  // Determine current user's role so we can switch the calculator into
+  // read-only mode for viewers. RLS already restricts the row above, so
+  // this query is just for the role, not for access control.
+  const { data: membership } = await supabase
+    .from("project_members")
+    .select("role")
+    .eq("project_id", project.id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const canEdit =
+    membership?.role === "owner" || membership?.role === "editor";
 
   return (
     <ExpenseCalculator
       projectId={project.id}
       initialName={project.name}
-      // The payload column is typed as Json; we trust the calculator's
-      // own normalizeState() to handle missing/corrupt fields.
       initialPayload={project.payload as never}
+      canEdit={canEdit}
     />
   );
 }

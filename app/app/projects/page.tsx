@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Settings } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createProject, deleteProject } from "./actions";
+import { createProject } from "./actions";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -22,12 +23,11 @@ export default async function ProjectsPage() {
     redirect("/auth/sign-in");
   }
 
-  // RLS already filters by owner_id, but we also pass it explicitly
-  // — defence in depth.
+  // RLS now filters by project_members membership (Block 3b migration).
+  // No explicit owner_id filter — viewers/editors see their projects too.
   const { data: projects } = await supabase
     .from("app_projects")
     .select("id, name, updated_at")
-    .eq("owner_id", user.id)
     .order("updated_at", { ascending: false });
 
   const items = projects ?? [];
@@ -68,16 +68,14 @@ export default async function ProjectsPage() {
                     Обновлён {formatDate(project.updated_at)}
                   </span>
                 </Link>
-                <form action={deleteProject} className="projects-delete">
-                  <input type="hidden" name="id" value={project.id} />
-                  <button
-                    type="submit"
-                    className="ghost-button danger projects-delete-button"
-                    aria-label={`Удалить «${project.name}»`}
-                  >
-                    Удалить
-                  </button>
-                </form>
+                <Link
+                  href={`/app/projects/${project.id}`}
+                  className="ghost-button projects-settings"
+                  aria-label={`Настройки проекта «${project.name}»`}
+                >
+                  <Settings size={16} aria-hidden="true" />
+                  <span>Настройки</span>
+                </Link>
               </li>
             ))}
           </ul>

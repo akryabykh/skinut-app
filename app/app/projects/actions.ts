@@ -22,25 +22,24 @@ async function requireUser() {
 // to the calculator pointing at it. Used by:
 //   - the "+ Создать" button on /app/projects
 //   - the /app/projects/new page
+//
+// Implementation note: goes through a SECURITY DEFINER RPC instead of
+// a plain .insert().select(). With the membership-based RLS from Block
+// 3b, INSERT … RETURNING is evaluated BEFORE the after-insert trigger
+// that adds the creator as 'owner', so the RETURNING is hidden by the
+// SELECT policy. The RPC bypasses RLS internally and gives us the new
+// project's id reliably.
 export async function createProject() {
-  const { supabase, user } = await requireUser();
+  const { supabase } = await requireUser();
 
-  const { data, error } = await supabase
-    .from("app_projects")
-    .insert({
-      owner_id: user.id,
-      name: "Новый проект",
-      payload: {},
-    })
-    .select("id")
-    .single();
+  const { data: projectId, error } = await supabase.rpc("create_app_project");
 
-  if (error || !data) {
+  if (error || !projectId) {
     throw new Error(error?.message ?? "Не удалось создать проект");
   }
 
   revalidatePath("/app/projects");
-  redirect(`/app?project=${data.id}`);
+  redirect(`/app?project=${projectId}`);
 }
 
 const renameSchema = z.object({
