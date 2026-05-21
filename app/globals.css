@@ -913,6 +913,143 @@ h2 {
   line-height: 1.5;
 }
 
+.projects-settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.members-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.members-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.members-info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.members-info strong {
+  font-weight: 800;
+}
+
+.members-info .meta {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.members-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.members-row-actions form {
+  margin: 0;
+}
+
+.members-role {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.members-role-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  background: var(--surface-strong);
+  color: var(--muted);
+}
+
+.members-role-label.members-role-owner {
+  background: rgba(15, 118, 110, 0.1);
+  color: var(--brand-dark);
+}
+
+.members-remove {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 0.86rem;
+}
+
+.invite-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.invite-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 10px;
+}
+
+.transfer-form {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 6px;
+}
+
+.calc-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.calc-fieldset:disabled {
+  opacity: 0.75;
+}
+
+.calc-readonly-banner {
+  margin: 6px 4px 10px;
+}
+
+@media (max-width: 560px) {
+  .invite-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .members-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .members-row-actions {
+    justify-content: flex-end;
+  }
+}
+
 @media (max-width: 760px) {
   .landing-hero {
     min-height: 620px;
