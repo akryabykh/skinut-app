@@ -63,9 +63,55 @@ export type Database = {
         };
         Relationships: [];
       };
+      project_members: {
+        Row: {
+          project_id: string;
+          user_id: string;
+          role: "owner" | "editor" | "viewer";
+          created_at: string;
+        };
+        Insert: {
+          project_id: string;
+          user_id: string;
+          role: "owner" | "editor" | "viewer";
+          created_at?: string;
+        };
+        Update: {
+          project_id?: string;
+          user_id?: string;
+          role?: "owner" | "editor" | "viewer";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      is_project_member: {
+        Args: { p_project_id: string; p_user_id: string };
+        Returns: boolean;
+      };
+      has_project_role: {
+        Args: {
+          p_project_id: string;
+          p_user_id: string;
+          p_min_role: "owner" | "editor" | "viewer";
+        };
+        Returns: boolean;
+      };
+      find_user_id_by_email: {
+        Args: { p_email: string };
+        Returns: string | null;
+      };
+      transfer_project_ownership: {
+        Args: { p_project_id: string; p_to_user_id: string };
+        Returns: undefined;
+      };
+      create_app_project: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
+    };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
   };
