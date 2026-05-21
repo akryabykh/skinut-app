@@ -107,6 +107,10 @@ export type Database = {
         Args: { p_project_id: string; p_to_user_id: string };
         Returns: undefined;
       };
+      create_app_project: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
