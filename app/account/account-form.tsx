@@ -2,6 +2,9 @@
 
 import { type FormEvent, useState } from "react";
 import { useActionState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { deleteAccount, updateDisplayName } from "./actions";
 import { emptyAccountFormState } from "./state";
 
@@ -32,11 +35,12 @@ export function AccountForm({ initialDisplayName, email }: AccountFormProps) {
 
   return (
     <>
-      <form action={formAction} className="auth-form" noValidate>
-        <label className="field">
-          <span className="field-label">Имя</span>
-          <input
-            className="text-input"
+      <form action={formAction} className="grid gap-4" noValidate>
+        <label className="grid gap-1.5">
+          <span className="text-[0.82rem] font-medium text-muted">
+            Имя для отображения
+          </span>
+          <Input
             name="displayName"
             type="text"
             defaultValue={initialDisplayName}
@@ -47,39 +51,46 @@ export function AccountForm({ initialDisplayName, email }: AccountFormProps) {
         </label>
 
         {state.status === "error" && state.message ? (
-          <p className="auth-banner auth-banner-error">{state.message}</p>
+          <p
+            role="alert"
+            className="rounded-control border border-danger/20 bg-[#FBEAE7] text-danger text-[0.93rem] leading-snug px-3.5 py-2.5"
+          >
+            {state.message}
+          </p>
         ) : null}
         {state.status === "success" && state.message ? (
-          <p className="auth-banner auth-banner-success">{state.message}</p>
+          <p
+            role="status"
+            className="rounded-control border border-[#F8D4C5] bg-accent-soft text-accent-dark text-[0.93rem] leading-snug px-3.5 py-2.5"
+          >
+            {state.message}
+          </p>
         ) : null}
 
-        <button
-          type="submit"
-          className="primary-button hero-button"
-          disabled={pending}
-        >
-          {pending ? "Сохраняем…" : "Сохранить"}
-        </button>
+        <div>
+          <Button type="submit" variant="primary" size="md" disabled={pending}>
+            {pending ? "Сохраняем…" : "Сохранить"}
+          </Button>
+        </div>
       </form>
 
-      <hr className="account-divider" />
-
-      <section className="danger-zone">
-        <h2>Опасная зона</h2>
-        <p>
+      <Card
+        variant="default"
+        className="!p-5 mt-6 !border-danger/20 !bg-[#FBEAE7]/30"
+      >
+        <h2 className="text-[1rem] font-bold tracking-[-0.01em] text-danger mb-1">
+          Опасная зона
+        </h2>
+        <p className="text-[0.9rem] text-muted leading-snug mb-4">
           Удаление аккаунта необратимо. Все ваши проекты — участники, расходы и
           история — будут стёрты вместе с аккаунтом.
         </p>
         <form action={deleteAccount} onSubmit={handleDeleteSubmit}>
-          <button
-            type="submit"
-            className="ghost-button danger hero-button"
-            disabled={deleting}
-          >
+          <Button type="submit" variant="danger" size="md" disabled={deleting}>
             {deleting ? "Удаляем…" : "Удалить аккаунт"}
-          </button>
+          </Button>
         </form>
-      </section>
+      </Card>
     </>
   );
 }

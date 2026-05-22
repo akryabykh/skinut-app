@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { signUp } from "../actions";
 import { emptyAuthFormState } from "../state";
 
@@ -12,21 +14,31 @@ export function SignUpForm() {
   // status "needs_confirmation" with a message — show it instead of the form.
   if (state.status === "needs_confirmation") {
     return (
-      <div className="auth-form">
-        <p className="auth-banner auth-banner-success">{state.message}</p>
-        <p className="auth-foot">
-          Уже подтвердили? <Link href="/auth/sign-in">Войти</Link>
+      <div className="grid gap-4">
+        <p
+          role="status"
+          className="rounded-control border border-[#F8D4C5] bg-accent-soft text-accent-dark text-[0.93rem] leading-snug px-3.5 py-3"
+        >
+          {state.message}
+        </p>
+        <p className="text-[0.92rem] text-muted text-center">
+          Уже подтвердили?{" "}
+          <Link
+            href="/auth/sign-in"
+            className="text-accent font-semibold hover:text-accent-dark transition-colors"
+          >
+            Войти
+          </Link>
         </p>
       </div>
     );
   }
 
   return (
-    <form action={formAction} className="auth-form" noValidate>
-      <label className="field">
-        <span className="field-label">Имя</span>
-        <input
-          className="text-input"
+    <form action={formAction} className="grid gap-4" noValidate>
+      <label className="grid gap-1.5">
+        <span className="text-[0.82rem] font-medium text-muted">Имя</span>
+        <Input
           name="displayName"
           type="text"
           required
@@ -35,14 +47,15 @@ export function SignUpForm() {
           aria-invalid={Boolean(state.fieldErrors.displayName)}
         />
         {state.fieldErrors.displayName && (
-          <span className="auth-error">{state.fieldErrors.displayName}</span>
+          <span className="text-[0.82rem] font-medium text-danger">
+            {state.fieldErrors.displayName}
+          </span>
         )}
       </label>
 
-      <label className="field">
-        <span className="field-label">Email</span>
-        <input
-          className="text-input"
+      <label className="grid gap-1.5">
+        <span className="text-[0.82rem] font-medium text-muted">Email</span>
+        <Input
           name="email"
           type="email"
           required
@@ -50,14 +63,15 @@ export function SignUpForm() {
           aria-invalid={Boolean(state.fieldErrors.email)}
         />
         {state.fieldErrors.email && (
-          <span className="auth-error">{state.fieldErrors.email}</span>
+          <span className="text-[0.82rem] font-medium text-danger">
+            {state.fieldErrors.email}
+          </span>
         )}
       </label>
 
-      <label className="field">
-        <span className="field-label">Пароль</span>
-        <input
-          className="text-input"
+      <label className="grid gap-1.5">
+        <span className="text-[0.82rem] font-medium text-muted">Пароль</span>
+        <Input
           name="password"
           type="password"
           required
@@ -66,24 +80,34 @@ export function SignUpForm() {
           aria-invalid={Boolean(state.fieldErrors.password)}
         />
         {state.fieldErrors.password && (
-          <span className="auth-error">{state.fieldErrors.password}</span>
+          <span className="text-[0.82rem] font-medium text-danger">
+            {state.fieldErrors.password}
+          </span>
         )}
+        <span className="text-[0.78rem] text-muted">Минимум 8 символов</span>
       </label>
 
       {state.status === "error" && state.message && (
-        <p className="auth-banner auth-banner-error">{state.message}</p>
+        <p
+          role="alert"
+          className="rounded-control border border-danger/20 bg-[#FBEAE7] text-danger text-[0.93rem] leading-snug px-3.5 py-2.5"
+        >
+          {state.message}
+        </p>
       )}
 
-      <button
-        className="primary-button hero-button"
-        type="submit"
-        disabled={pending}
-      >
+      <Button type="submit" variant="primary" size="cta" disabled={pending}>
         {pending ? "Создаём…" : "Зарегистрироваться"}
-      </button>
+      </Button>
 
-      <p className="auth-foot">
-        Уже есть аккаунт? <Link href="/auth/sign-in">Войти</Link>
+      <p className="text-[0.92rem] text-muted text-center mt-1">
+        Уже есть аккаунт?{" "}
+        <Link
+          href="/auth/sign-in"
+          className="text-accent font-semibold hover:text-accent-dark transition-colors"
+        >
+          Войти
+        </Link>
       </p>
     </form>
   );

@@ -77,9 +77,11 @@ export default async function HomePage() {
               <span>{isAuthenticated ? "Мои проекты" : "Начать"}</span>
               <ArrowRight size={18} aria-hidden="true" />
             </LinkButton>
-            <LinkButton href="/app" variant="secondary" size="cta">
-              Открыть калькулятор
-            </LinkButton>
+            {isAuthenticated ? (
+              <LinkButton href="/app" variant="secondary" size="cta">
+                Открыть калькулятор
+              </LinkButton>
+            ) : null}
           </div>
           <p className="text-[0.85rem] text-muted pt-1">
             Без рекламы. Данные хранятся только у вас.
