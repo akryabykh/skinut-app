@@ -1,6 +1,11 @@
 "use client";
 
-import { useActionState, type FormEvent } from "react";
+import {
+  useActionState,
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
 import { deleteProject } from "../actions";
 import {
   changeRole,
@@ -9,6 +14,7 @@ import {
   removeMember,
   transferOwnership,
 } from "../members-actions";
+import { disableShare, enableShare } from "../share-actions";
 import {
   emptyMembersFormState,
   ROLE_LABEL_RU,
@@ -18,6 +24,7 @@ import {
 
 type ProjectManagementProps = {
   projectId: string;
+  shareToken: string | null;
   members: MemberInfo[];
   currentUserId: string;
   myRole: MemberRole;
@@ -29,11 +36,13 @@ function memberLabel(m: MemberInfo): string {
 
 export function ProjectManagement({
   projectId,
+  shareToken,
   members,
   currentUserId,
   myRole,
 }: ProjectManagementProps) {
   const isOwner = myRole === "owner";
+  const canEdit = myRole === "owner" || myRole === "editor";
   const otherMembers = members.filter((m) => m.user_id !== currentUserId);
   const ownersCount = members.filter((m) => m.role === "owner").length;
   const iAmSoleOwner = isOwner && ownersCount === 1;
@@ -43,6 +52,34 @@ export function ProjectManagement({
     inviteMember,
     emptyMembersFormState,
   );
+
+  // Build the full share URL on the client (server doesn't know origin).
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
+
+  useEffect(() => {
+    if (shareToken) {
+      setShareUrl(`${window.location.origin}/share/${shareToken}`);
+    } else {
+      setShareUrl("");
+    }
+    setShareCopied(false);
+  }, [shareToken]);
+
+  async function copyShareUrl() {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      // Fallback: select the input so the user can copy manually.
+      const input = document.getElementById(
+        "share-link-input",
+      ) as HTMLInputElement | null;
+      input?.select();
+    }
+  }
 
   function confirmAndProceed(message: string) {
     return (event: FormEvent<HTMLFormElement>) => {
@@ -166,6 +203,73 @@ export function ProjectManagement({
           </form>
         ) : null}
       </section>
+
+      {canEdit ? (
+        <section className="placeholder-panel">
+          <h2>Публичная ссылка</h2>
+          {shareToken ? (
+            <>
+              <p>
+                У кого есть эта ссылка — увидит результат расчёта (итоговую
+                сумму и переводы). Деталей платежей и личных данных там нет.
+              </p>
+              <div className="share-link-row">
+                <input
+                  id="share-link-input"
+                  className="text-input share-link-input"
+                  type="text"
+                  readOnly
+                  value={shareUrl || `…/share/${shareToken}`}
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <button
+                  type="button"
+                  onClick={copyShareUrl}
+                  className="primary-button"
+                  disabled={!shareUrl}
+                >
+                  {shareCopied ? "Скопировано" : "Скопировать"}
+                </button>
+              </div>
+              <div className="share-actions">
+                <form
+                  action={enableShare}
+                  onSubmit={confirmAndProceed(
+                    "Создать новую ссылку? Старая перестанет работать.",
+                  )}
+                >
+                  <input type="hidden" name="projectId" value={projectId} />
+                  <button type="submit" className="ghost-button">
+                    Создать новую ссылку
+                  </button>
+                </form>
+                <form
+                  action={disableShare}
+                  onSubmit={confirmAndProceed("Отключить публичный доступ?")}
+                >
+                  <input type="hidden" name="projectId" value={projectId} />
+                  <button type="submit" className="ghost-button danger">
+                    Отключить
+                  </button>
+                </form>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>
+                Создайте ссылку, чтобы поделиться итогом расчёта с теми, у кого
+                нет аккаунта.
+              </p>
+              <form action={enableShare}>
+                <input type="hidden" name="projectId" value={projectId} />
+                <button type="submit" className="primary-button">
+                  Создать публичную ссылку
+                </button>
+              </form>
+            </>
+          )}
+        </section>
+      ) : null}
 
       <section className="placeholder-panel danger-zone">
         <h2>Опасная зона</h2>

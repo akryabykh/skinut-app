@@ -25,7 +25,7 @@ export default async function ProjectDetailPage({
 
   const { data: project } = await supabase
     .from("app_projects")
-    .select("id, name")
+    .select("id, name, share_token")
     .eq("id", id)
     .maybeSingle();
 
@@ -66,6 +66,7 @@ export default async function ProjectDetailPage({
 
       <ProjectManagement
         projectId={project.id}
+        shareToken={project.share_token}
         members={members}
         currentUserId={user.id}
         myRole={myMembership.role}

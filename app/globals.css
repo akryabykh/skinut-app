@@ -1035,6 +1035,37 @@ h2 {
   margin: 6px 4px 10px;
 }
 
+.share-link-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+  align-items: stretch;
+}
+
+.share-link-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84rem;
+}
+
+.share-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.share-actions form {
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .share-link-row {
+    flex-direction: column;
+  }
+}
+
 @media (max-width: 560px) {
   .invite-fields {
     grid-template-columns: 1fr;
