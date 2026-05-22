@@ -640,19 +640,19 @@ h2 {
   font-size: 1.05rem;
 }
 
-.visual-card-main {
-  right: 34px;
-  bottom: 72px;
-}
-
 .visual-card-side {
-  right: 250px;
-  top: 58px;
+  right: 44px;
+  top: 56px;
 }
 
 .visual-card-third {
-  right: 104px;
-  top: 112px;
+  right: 44px;
+  top: 152px;
+}
+
+.visual-card-main {
+  right: 44px;
+  bottom: 56px;
 }
 
 .how-section {

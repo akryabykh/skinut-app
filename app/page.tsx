@@ -36,11 +36,13 @@ export default async function HomePage() {
 
       <section className="landing-hero">
         <div className="hero-scene" aria-hidden="true">
-          <Image src="/logo.svg" alt="" width={132} height={132} priority />
-          <div className="visual-card visual-card-main">
-            <span>Итог</span>
-            <strong>Аня → Илья 2 450 ₽</strong>
-          </div>
+          <Image
+            src="/logo-hero.svg"
+            alt=""
+            width={132}
+            height={132}
+            priority
+          />
           <div className="visual-card visual-card-side">
             <span>Всего потрачено</span>
             <strong>18 900 ₽</strong>
@@ -48,6 +50,10 @@ export default async function HomePage() {
           <div className="visual-card visual-card-third">
             <span>Покупки</span>
             <strong>Такси · Ужин · Отель</strong>
+          </div>
+          <div className="visual-card visual-card-main">
+            <span>Итог</span>
+            <strong>Алия → Ия 450 ₽</strong>
           </div>
         </div>
         <div className="hero-copy">
