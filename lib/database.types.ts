@@ -42,6 +42,7 @@ export type Database = {
           owner_id: string;
           name: string;
           payload: Json;
+          share_token: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -50,6 +51,7 @@ export type Database = {
           owner_id: string;
           name?: string;
           payload?: Json;
+          share_token?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -58,6 +60,7 @@ export type Database = {
           owner_id?: string;
           name?: string;
           payload?: Json;
+          share_token?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -110,6 +113,14 @@ export type Database = {
       create_app_project: {
         Args: Record<string, never>;
         Returns: string;
+      };
+      get_public_project_summary: {
+        Args: { p_token: string };
+        Returns: {
+          name: string;
+          payload: Json;
+          updated_at: string;
+        }[];
       };
     };
     Enums: { [_ in never]: never };
