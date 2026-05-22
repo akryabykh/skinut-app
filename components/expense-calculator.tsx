@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ListChecks, Receipt, Settings, Users, WalletCards } from "lucide-react";
+import { ListChecks, Receipt, Settings, UserCircle2, Users, WalletCards } from "lucide-react";
 import { Brand } from "@/components/brand";
 import {
   fetchCurrentRate,
@@ -124,6 +124,35 @@ function compareText(first: string, second: string) {
   return first.localeCompare(second, "ru", { sensitivity: "base" });
 }
 
+// Format a cleaned numeric string with thousand spaces. Keeps the decimal
+// part intact: "70000" → "70 000", "70000.50" → "70 000.50".
+function formatThousands(raw: string): string {
+  if (!raw) return "";
+  const [int, dec] = raw.split(".");
+  const intFmt = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return dec !== undefined ? `${intFmt}.${dec}` : intFmt;
+}
+
+// Strip user input down to a "machine-friendly" decimal string: digits,
+// at most one dot, no spaces. Used while typing so React state stays
+// parseable by Number(). Examples:
+//   "70 000"     → "70000"
+//   "70 000,50"  → "70000.50"
+//   "abc"        → ""
+function sanitizeAmountInput(value: string): string {
+  const cleaned = value
+    .replace(/\s/g, "")
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "");
+  // Keep only the first dot.
+  const firstDot = cleaned.indexOf(".");
+  if (firstDot === -1) return cleaned;
+  return (
+    cleaned.slice(0, firstDot + 1) +
+    cleaned.slice(firstDot + 1).replace(/\./g, "")
+  );
+}
+
 export function ExpenseCalculator({
   projectId,
   initialName,
@@ -149,6 +178,7 @@ export function ExpenseCalculator({
   const [personName, setPersonName] = useState("");
   const [expenseName, setExpenseName] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
+  const [isAmountFocused, setIsAmountFocused] = useState(false);
   const [expensePayer, setExpensePayer] = useState("");
   const [expenseCurrency, setExpenseCurrency] = useState<string>(primaryCurrency);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
@@ -336,9 +366,11 @@ export function ExpenseCalculator({
         exchangeRate = await fetchCurrentRate(expenseCurrency, primaryCurrency);
       } catch (err) {
         console.warn("Не удалось получить курс валюты", err);
-        alert(
-          "Не удалось получить курс валюты. Проверьте подключение и попробуйте снова.",
-        );
+        const reason =
+          err instanceof Error && err.message
+            ? err.message
+            : "сервис курсов недоступен";
+        alert(`Не удалось получить курс валюты: ${reason}`);
         setIsAddingExpense(false);
         return;
       }
@@ -411,14 +443,24 @@ export function ExpenseCalculator({
           <Brand href={isOwnedProject ? "/app/projects" : "/"} />
         </div>
         {isOwnedProject && projectId ? (
-          <Link
-            href={`/app/projects/${projectId}`}
-            className="nav-button calc-nav-link"
-            aria-label="Настройки проекта"
-          >
-            <Settings size={18} aria-hidden="true" />
-            <span>Настройки</span>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/account"
+              className="nav-button calc-nav-link"
+              aria-label="Личный кабинет"
+            >
+              <UserCircle2 size={18} aria-hidden="true" />
+              <span className="hidden sm:inline">Личный кабинет</span>
+            </Link>
+            <Link
+              href={`/app/projects/${projectId}`}
+              className="nav-button calc-nav-link"
+              aria-label="Настройки проекта"
+            >
+              <Settings size={18} aria-hidden="true" />
+              <span className="hidden sm:inline">Настройки</span>
+            </Link>
+          </div>
         ) : null}
       </header>
 
@@ -550,13 +592,20 @@ export function ExpenseCalculator({
               </span>
               <input
                 className="text-input"
-                type="number"
+                type="text"
                 inputMode="decimal"
-                min="0.01"
-                step="0.01"
+                autoComplete="off"
                 placeholder="0"
-                value={expenseAmount}
-                onChange={(event) => setExpenseAmount(event.target.value)}
+                value={
+                  isAmountFocused
+                    ? expenseAmount
+                    : formatThousands(expenseAmount)
+                }
+                onChange={(event) =>
+                  setExpenseAmount(sanitizeAmountInput(event.target.value))
+                }
+                onFocus={() => setIsAmountFocused(true)}
+                onBlur={() => setIsAmountFocused(false)}
                 required
               />
             </label>
