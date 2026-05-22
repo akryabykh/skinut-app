@@ -10,6 +10,22 @@ export type Expense = {
   payerId: string;
   participantIds: string[];
   createdAt?: string;
+  /**
+   * ISO 4217 currency code the expense was paid in. Optional for backwards
+   * compatibility with pre-Block-4 records — when missing, the expense is
+   * treated as denominated in the project's primary currency.
+   */
+  currency?: string;
+  /**
+   * Multiplier captured at the moment the expense was saved.
+   * To convert the expense's amount into the project's primary currency:
+   *
+   *     primary_amount = expense.amount * expense.exchange_rate_used
+   *
+   * When undefined (legacy record or expense already in primary currency),
+   * a multiplier of 1 is assumed and `amount` is treated as primary directly.
+   */
+  exchange_rate_used?: number;
 };
 
 export type Transfer = {
@@ -25,15 +41,35 @@ export type PersonalCost = {
 
 const MONEY_EPSILON = 0.009;
 
+/**
+ * Convert an expense's amount to the project's primary currency.
+ * Pre-Block-4 records have neither `currency` nor `exchange_rate_used`
+ * and are treated as already-in-primary (multiplier 1).
+ *
+ * Note: split-calculator never sees the project's primary currency code
+ * directly — the conversion only relies on the multiplier captured on the
+ * expense at save time. This keeps historical math stable when fx rates
+ * change later.
+ */
+export function toPrimary(expense: Expense): number {
+  const rate =
+    typeof expense.exchange_rate_used === "number" &&
+    Number.isFinite(expense.exchange_rate_used) &&
+    expense.exchange_rate_used > 0
+      ? expense.exchange_rate_used
+      : 1;
+  return Number(expense.amount) * rate;
+}
+
 export function getTotalAmount(expenses: Expense[]): number {
-  return expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  return expenses.reduce((sum, expense) => sum + toPrimary(expense), 0);
 }
 
 export function calculatePersonalCosts(people: Person[], expenses: Expense[]): PersonalCost[] {
   const costs = new Map(people.map((person) => [person.id, 0]));
 
   expenses.forEach((expense) => {
-    const amount = Number(expense.amount);
+    const amount = toPrimary(expense);
     const participantIds = expense.participantIds.filter((id) => costs.has(id));
     if (!participantIds.length) {
       return;
@@ -55,7 +91,7 @@ export function calculateTransfers(people: Person[], expenses: Expense[]): Trans
   const balances = new Map(people.map((person) => [person.id, 0]));
 
   expenses.forEach((expense) => {
-    const amount = Number(expense.amount);
+    const amount = toPrimary(expense);
     const participantIds = expense.participantIds.filter((id) => balances.has(id));
     if (!participantIds.length || !balances.has(expense.payerId)) {
       return;
