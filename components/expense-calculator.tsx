@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import {
   FormEvent,
@@ -11,14 +10,24 @@ import {
   useState,
 } from "react";
 import { ListChecks, Receipt, Settings, Users, WalletCards } from "lucide-react";
-import { saveProjectPayload } from "@/app/app/projects/actions";
+import { Brand } from "@/components/brand";
+import {
+  fetchCurrentRate,
+  saveProjectPayload,
+} from "@/app/app/projects/actions";
 import {
   calculatePersonalCosts,
   calculateTransfers,
   getTotalAmount,
+  toPrimary,
   type Expense,
   type Person,
 } from "@/lib/split-calculator";
+import {
+  DEFAULT_PRIMARY_CURRENCY,
+  formatMoney,
+  getCurrency,
+} from "@/lib/currencies";
 
 type ExpenseSort =
   | "created-desc"
@@ -48,6 +57,12 @@ type ExpenseCalculatorProps = {
   // current user has the "viewer" role on this project — the UI becomes
   // a read-only snapshot and persistState becomes a noop.
   canEdit?: boolean;
+  // Block 4: project's primary currency (settlement currency). All totals
+  // and transfers are displayed in this. Defaults to RUB for guest mode.
+  primaryCurrency?: string;
+  // Optional secondary currency for trips abroad. When present, the
+  // expense form shows a segmented switch between primary/secondary.
+  secondaryCurrency?: string | null;
 };
 
 const STORAGE_KEY = "split-app-state-v1";
@@ -58,16 +73,6 @@ const DEFAULT_STATE: ProjectState = {
   people: [],
   expenses: [],
 };
-
-const currency = new Intl.NumberFormat("ru-RU", {
-  style: "currency",
-  currency: "RUB",
-  maximumFractionDigits: 2,
-});
-
-function money(value: number) {
-  return currency.format(value).replace(",00", "");
-}
 
 function plural(count: number, one: string, few: string, many: string) {
   const mod10 = count % 10;
@@ -124,13 +129,15 @@ export function ExpenseCalculator({
   initialName,
   initialPayload,
   canEdit = true,
+  primaryCurrency = DEFAULT_PRIMARY_CURRENCY,
+  secondaryCurrency = null,
 }: ExpenseCalculatorProps = {}) {
   const isOwnedProject = Boolean(projectId);
   const isReadOnly = !canEdit;
+  const hasSecondary = Boolean(secondaryCurrency);
 
   const [state, setState] = useState<ProjectState>(() => {
     if (isOwnedProject) {
-      // Server-provided initial data — render with it on the first paint.
       return normalizeState({
         ...(initialPayload ?? {}),
         projectName: initialName ?? initialPayload?.projectName,
@@ -143,7 +150,9 @@ export function ExpenseCalculator({
   const [expenseName, setExpenseName] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expensePayer, setExpensePayer] = useState("");
+  const [expenseCurrency, setExpenseCurrency] = useState<string>(primaryCurrency);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
+  const [isAddingExpense, setIsAddingExpense] = useState(false);
   // Owned projects render with server data immediately, guests need to
   // hydrate from localStorage first.
   const [isReady, setIsReady] = useState(isOwnedProject);
@@ -187,8 +196,6 @@ export function ExpenseCalculator({
   // projects, synchronous localStorage for guests.
   const persistState = useCallback(
     (nextState: ProjectState) => {
-      // Viewers don't get to write. Their UI is already disabled via the
-      // <fieldset disabled> wrapper below, but this is the second layer.
       if (isReadOnly) return;
 
       if (isOwnedProject && projectId) {
@@ -256,7 +263,11 @@ export function ExpenseCalculator({
     () => calculatePersonalCosts(state.people, state.expenses),
     [state.people, state.expenses],
   );
-  const totalAmount = useMemo(() => getTotalAmount(state.expenses), [state.expenses]);
+  // total is in primary currency (toPrimary applied inside getTotalAmount).
+  const totalAmountPrimary = useMemo(
+    () => getTotalAmount(state.expenses),
+    [state.expenses],
+  );
 
   function addPerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -293,8 +304,10 @@ export function ExpenseCalculator({
     });
   }
 
-  function addExpense(event: FormEvent<HTMLFormElement>) {
+  async function addExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isAddingExpense) return;
+
     const amount = Number(expenseAmount);
 
     if (!state.people.length) {
@@ -313,6 +326,25 @@ export function ExpenseCalculator({
     const cleanExpenseName = expenseName.trim();
     if (!cleanExpenseName || Number.isNaN(amount) || amount <= 0) return;
 
+    // For secondary-currency expenses fetch a fresh rate to stamp onto
+    // the record. This gives the user an instant ≈ X primary preview
+    // and the server preserves the rate on save.
+    let exchangeRate = 1;
+    if (expenseCurrency !== primaryCurrency) {
+      setIsAddingExpense(true);
+      try {
+        exchangeRate = await fetchCurrentRate(expenseCurrency, primaryCurrency);
+      } catch (err) {
+        console.warn("Не удалось получить курс валюты", err);
+        alert(
+          "Не удалось получить курс валюты. Проверьте подключение и попробуйте снова.",
+        );
+        setIsAddingExpense(false);
+        return;
+      }
+      setIsAddingExpense(false);
+    }
+
     commitState({
       ...state,
       expenses: [
@@ -324,6 +356,8 @@ export function ExpenseCalculator({
           payerId: expensePayer,
           participantIds: selectedParticipantIds,
           createdAt: new Date().toISOString(),
+          currency: expenseCurrency,
+          exchange_rate_used: exchangeRate,
         },
       ],
     });
@@ -332,6 +366,7 @@ export function ExpenseCalculator({
     setExpenseAmount("");
     setExpensePayer("");
     setSelectedParticipantIds(state.people.map((p) => p.id));
+    setExpenseCurrency(primaryCurrency);
   }
 
   function removeExpense(expenseId: string) {
@@ -354,6 +389,7 @@ export function ExpenseCalculator({
     setExpenseAmount("");
     setExpensePayer("");
     setSelectedParticipantIds([]);
+    setExpenseCurrency(primaryCurrency);
   }
 
   function toggleParticipant(personId: string) {
@@ -364,22 +400,15 @@ export function ExpenseCalculator({
     );
   }
 
+  const primaryCurrencyInfo = getCurrency(primaryCurrency);
+  const expenseCurrencyInfo = getCurrency(expenseCurrency);
+
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="grid gap-1">
           <p className="eyebrow">Калькулятор расходов</p>
-          <h1 className="app-title">
-            <Image
-              src="/logo.svg"
-              alt=""
-              width={38}
-              height={38}
-              className="brand-mark"
-              priority
-            />
-            Скинуться
-          </h1>
+          <Brand href={isOwnedProject ? "/app/projects" : "/"} />
         </div>
         {isOwnedProject && projectId ? (
           <Link
@@ -419,6 +448,19 @@ export function ExpenseCalculator({
           }
           disabled={!isReady}
         />
+        {isOwnedProject ? (
+          <p className="meta mt-2">
+            Итоги считаются в {primaryCurrency}
+            {primaryCurrencyInfo ? ` (${primaryCurrencyInfo.symbol})` : ""}
+            {hasSecondary && secondaryCurrency
+              ? ` · вторая валюта: ${secondaryCurrency}${
+                  getCurrency(secondaryCurrency)
+                    ? ` (${getCurrency(secondaryCurrency)!.symbol})`
+                    : ""
+                }`
+              : ""}
+          </p>
+        ) : null}
       </section>
 
       <section className="workspace">
@@ -500,10 +542,16 @@ export function ExpenseCalculator({
           </label>
           <div className="two-columns">
             <label className="field">
-              <span className="field-label">Сумма</span>
+              <span className="field-label">
+                Сумма
+                {expenseCurrencyInfo
+                  ? `, ${expenseCurrencyInfo.symbol}`
+                  : ""}
+              </span>
               <input
                 className="text-input"
                 type="number"
+                inputMode="decimal"
                 min="0.01"
                 step="0.01"
                 placeholder="0"
@@ -531,6 +579,29 @@ export function ExpenseCalculator({
               </select>
             </label>
           </div>
+          {hasSecondary && secondaryCurrency ? (
+            <div className="field">
+              <span className="field-label">Валюта</span>
+              <div
+                role="radiogroup"
+                aria-label="Валюта расхода"
+                className="inline-flex gap-1 rounded-control bg-[#F4F4F1] p-1 self-start"
+              >
+                <CurrencyToggle
+                  active={expenseCurrency === primaryCurrency}
+                  onClick={() => setExpenseCurrency(primaryCurrency)}
+                  label={`${primaryCurrency} ${primaryCurrencyInfo?.symbol ?? ""}`}
+                />
+                <CurrencyToggle
+                  active={expenseCurrency === secondaryCurrency}
+                  onClick={() => setExpenseCurrency(secondaryCurrency)}
+                  label={`${secondaryCurrency} ${
+                    getCurrency(secondaryCurrency)?.symbol ?? ""
+                  }`}
+                />
+              </div>
+            </div>
+          ) : null}
           <fieldset className="participants-box">
             <legend>Кто участвует</legend>
             <div className="payer-actions">
@@ -572,9 +643,19 @@ export function ExpenseCalculator({
               )}
             </div>
           </fieldset>
-          <button className="primary-button full-width" type="submit">
-            <span className="button-icon" aria-hidden="true">+</span>
-            Добавить расход
+          <button
+            className="primary-button full-width"
+            type="submit"
+            disabled={isAddingExpense}
+          >
+            {isAddingExpense ? (
+              <span>Сохраняем…</span>
+            ) : (
+              <>
+                <span className="button-icon" aria-hidden="true">+</span>
+                Добавить расход
+              </>
+            )}
           </button>
         </form>
       </section>
@@ -621,12 +702,26 @@ export function ExpenseCalculator({
               <span>Добавьте первую покупку или общий платеж.</span>
             </div>
           ) : (
-            sortedExpenses.map((expense) => (
-              <article className="expense-item" key={expense.id}>
-                <div className="expense-main">
-                  <strong>{expense.name}</strong>
+            sortedExpenses.map((expense) => {
+              const code = expense.currency ?? primaryCurrency;
+              const isSecondary = code !== primaryCurrency;
+              return (
+                <article className="expense-item" key={expense.id}>
                   <div className="expense-main">
-                    <span className="money">{money(expense.amount)}</span>
+                    <strong>{expense.name}</strong>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="money">
+                        {formatMoney(expense.amount, code, { compact: true })}
+                      </span>
+                      {isSecondary ? (
+                        <span className="text-[0.78rem] text-muted font-mono tabular-nums">
+                          ≈{" "}
+                          {formatMoney(toPrimary(expense), primaryCurrency, {
+                            compact: true,
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
                     <button
                       className="expense-remove"
                       type="button"
@@ -636,13 +731,13 @@ export function ExpenseCalculator({
                       ×
                     </button>
                   </div>
-                </div>
-                <p className="meta">
-                  Оплатил: {getPersonName(expense.payerId)}. Участвуют:{" "}
-                  {expense.participantIds.map(getPersonName).join(", ")}.
-                </p>
-              </article>
-            ))
+                  <p className="meta">
+                    Оплатил: {getPersonName(expense.payerId)}. Участвуют:{" "}
+                    {expense.participantIds.map(getPersonName).join(", ")}.
+                  </p>
+                </article>
+              );
+            })
           )}
         </div>
       </section>
@@ -656,7 +751,9 @@ export function ExpenseCalculator({
               </span>
               Итог
             </h2>
-            <p>{money(totalAmount)} всего</p>
+            <p>
+              {formatMoney(totalAmountPrimary, primaryCurrency, { compact: true })} всего
+            </p>
           </div>
         </div>
         <div className="summary-list">
@@ -680,7 +777,11 @@ export function ExpenseCalculator({
                   <strong>
                     {getPersonName(transfer.from)} → {getPersonName(transfer.to)}
                   </strong>
-                  <span className="money">{money(transfer.amount)}</span>
+                  <span className="money">
+                    {formatMoney(transfer.amount, primaryCurrency, {
+                      compact: true,
+                    })}
+                  </span>
                 </div>
               </article>
             ))
@@ -694,7 +795,11 @@ export function ExpenseCalculator({
           <div className="details-content">
             <p className="details-total">
               <strong>Всего потрачено денег:</strong>{" "}
-              <span>{money(totalAmount)}</span>
+              <span>
+                {formatMoney(totalAmountPrimary, primaryCurrency, {
+                  compact: true,
+                })}
+              </span>
             </p>
             <h3>Стоимость для каждого:</h3>
             <div className="person-cost-list">
@@ -709,7 +814,11 @@ export function ExpenseCalculator({
                 personalCosts.map((cost) => (
                   <div className="person-cost-item" key={cost.personId}>
                     <span>{getPersonName(cost.personId)}</span>
-                    <strong>{money(cost.amount)}</strong>
+                    <strong>
+                      {formatMoney(cost.amount, primaryCurrency, {
+                        compact: true,
+                      })}
+                    </strong>
                   </div>
                 ))
               )}
@@ -719,5 +828,31 @@ export function ExpenseCalculator({
       </section>
       </fieldset>
     </main>
+  );
+}
+
+function CurrencyToggle({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={[
+        "inline-flex items-center justify-center h-9 px-3 rounded-[6px] text-[0.88rem] font-semibold transition-colors",
+        active
+          ? "bg-white text-ink shadow-xs"
+          : "bg-transparent text-muted hover:text-ink",
+      ].join(" ")}
+    >
+      {label}
+    </button>
   );
 }
