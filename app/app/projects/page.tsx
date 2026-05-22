@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { Settings } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createProject } from "./actions";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -49,11 +48,11 @@ export default async function ProjectsPage() {
           участников и трат. Все изменения сохраняются автоматически.
         </p>
 
-        <form action={createProject} className="projects-create">
-          <button type="submit" className="primary-button hero-button">
+        <div className="projects-create">
+          <Link href="/app/projects/new" className="primary-button hero-button">
             + Создать новый проект
-          </button>
-        </form>
+          </Link>
+        </div>
 
         {items.length > 0 ? (
           <ul className="projects-list">

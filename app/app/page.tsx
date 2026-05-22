@@ -1,5 +1,6 @@
 import { ExpenseCalculator } from "@/components/expense-calculator";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { DEFAULT_PRIMARY_CURRENCY } from "@/lib/currencies";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -15,7 +16,8 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   const params: SearchParams = searchParams ? await searchParams : {};
   const projectId = firstParam(params.project);
 
-  // Guest mode: no project param → calculator uses localStorage.
+  // Guest mode: no project param → calculator uses localStorage,
+  // defaults to RUB primary, no secondary.
   if (!projectId) {
     return <ExpenseCalculator />;
   }
@@ -33,7 +35,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   // RLS filters by membership now; if the user isn't a member we get null.
   const { data: project } = await supabase
     .from("app_projects")
-    .select("id, name, payload")
+    .select("id, name, payload, primary_currency, secondary_currency")
     .eq("id", projectId)
     .maybeSingle();
 
@@ -60,6 +62,8 @@ export default async function AppPage({ searchParams }: AppPageProps) {
       initialName={project.name}
       initialPayload={project.payload as never}
       canEdit={canEdit}
+      primaryCurrency={project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY}
+      secondaryCurrency={project.secondary_currency}
     />
   );
 }
