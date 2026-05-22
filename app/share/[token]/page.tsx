@@ -8,19 +8,13 @@ import {
   type Expense,
   type Person,
 } from "@/lib/split-calculator";
+import {
+  DEFAULT_PRIMARY_CURRENCY,
+  formatMoney,
+} from "@/lib/currencies";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const currency = new Intl.NumberFormat("ru-RU", {
-  style: "currency",
-  currency: "RUB",
-  maximumFractionDigits: 2,
-});
-
-function money(value: number): string {
-  return currency.format(value).replace(",00", "");
-}
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("ru-RU", {
@@ -65,6 +59,8 @@ export default async function PublicSharePage({
 
   const row = data[0];
   const payload = (row.payload ?? {}) as PublicPayload;
+  const primaryCurrency =
+    (row.primary_currency as string | null) ?? DEFAULT_PRIMARY_CURRENCY;
 
   const people: Person[] = Array.isArray(payload.people)
     ? (payload.people as Person[]).filter(
@@ -77,6 +73,10 @@ export default async function PublicSharePage({
       )
     : [];
 
+  // calculateTransfers / getTotalAmount already convert into the project's
+  // primary currency via the exchange_rate_used stamped on each expense
+  // at save time. The share page therefore just formats the resulting
+  // primary-currency numbers.
   const transfers = calculateTransfers(people, expenses);
   const totalAmount = getTotalAmount(expenses);
 
@@ -102,7 +102,10 @@ export default async function PublicSharePage({
       <section className="placeholder-panel summary-panel">
         <h2>Итог</h2>
         <p className="details-total">
-          <strong>Всего потрачено:</strong> <span>{money(totalAmount)}</span>
+          <strong>Всего потрачено:</strong>{" "}
+          <span>
+            {formatMoney(totalAmount, primaryCurrency, { compact: true })}
+          </span>
         </p>
 
         {transfers.length === 0 ? (
@@ -121,7 +124,9 @@ export default async function PublicSharePage({
                   <strong>
                     {nameOf(t.from)} → {nameOf(t.to)}
                   </strong>
-                  <span className="money">{money(t.amount)}</span>
+                  <span className="money">
+                    {formatMoney(t.amount, primaryCurrency, { compact: true })}
+                  </span>
                 </div>
               </article>
             ))}
