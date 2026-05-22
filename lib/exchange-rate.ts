@@ -104,10 +104,13 @@ export async function getExchangeRate(
     return { rate: liveRate, source: "live" };
   } catch (err) {
     // Upstream is down. Serve stale cache if we have any.
+    console.error(
+      `[exchange-rate] getExchangeRate failed for ${baseCode}→${targetCode}`,
+      err,
+    );
     if (cachedRate !== null && Number.isFinite(cachedRate) && cachedRate > 0) {
       console.warn(
         `[exchange-rate] upstream down, returning stale cache for ${baseCode}→${targetCode}`,
-        err,
       );
       return {
         rate: cachedRate,
@@ -115,9 +118,9 @@ export async function getExchangeRate(
         cached_at: cached!.fetched_at as string,
       };
     }
+    const reason = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Не удалось получить курс ${baseCode} → ${targetCode}. ` +
-        `Сервис курсов недоступен и кэш пуст. Попробуйте позже.`,
+      `Не удалось получить курс ${baseCode} → ${targetCode}: ${reason}`,
     );
   }
 }
@@ -136,32 +139,52 @@ async function fetchFrankfurterRate(
     base,
   )}&to=${encodeURIComponent(target)}`;
 
-  const response = await fetch(url, {
-    // Node fetch — small timeout via AbortSignal to keep server actions snappy.
-    signal: AbortSignal.timeout(7000),
-    // Frankfurter doesn't need auth.
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
+  // Up to 2 attempts: frankfurter occasionally returns 502/timeout on cold
+  // edges and recovers on the next call. 15s timeout is generous — Vercel
+  // function timeout is 10s on Hobby plans / 60s on Pro, so we stay below.
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(15000),
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
 
-  if (!response.ok) {
-    throw new Error(
-      `Frankfurter responded ${response.status} for ${base}→${target}`,
-    );
+      if (!response.ok) {
+        throw new Error(
+          `Frankfurter responded ${response.status} for ${base}→${target}`,
+        );
+      }
+
+      const body = (await response.json()) as {
+        rates?: Record<string, number>;
+      };
+
+      const rate = body.rates?.[target];
+      if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) {
+        throw new Error(
+          `Frankfurter returned no valid rate for ${base}→${target}: ${JSON.stringify(
+            body,
+          )}`,
+        );
+      }
+
+      return rate;
+    } catch (err) {
+      lastError = err;
+      console.error(
+        `[exchange-rate] frankfurter attempt ${attempt}/2 failed for ${base}→${target}`,
+        err,
+      );
+      if (attempt < 2) {
+        // Short pause before retry.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
   }
 
-  const body = (await response.json()) as {
-    rates?: Record<string, number>;
-  };
-
-  const rate = body.rates?.[target];
-  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) {
-    throw new Error(
-      `Frankfurter returned no valid rate for ${base}→${target}: ${JSON.stringify(
-        body,
-      )}`,
-    );
-  }
-
-  return rate;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Frankfurter failed for ${base}→${target}`);
 }
