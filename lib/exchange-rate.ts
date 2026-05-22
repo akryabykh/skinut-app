@@ -1,10 +1,10 @@
 // Exchange-rate fetcher with Postgres-backed cache.
 //
-// Source: frankfurter.app — free, no API key, ECB-based rates that refresh
-// once a day around 16:00 CET. That's plenty for bill-splitting in the
-// trip-money context: when you record a 6 850 ₺ dinner the same evening,
-// using yesterday's rate vs today's rate moves the rubble number by
-// fractions of a percent at most.
+// Source: open.er-api.com — free, no API key, daily-refreshed rates from
+// exchangerate-api.com's open endpoint. Crucially, it supports RUB and all
+// the regional currencies in lib/currencies.ts (GEL, AMD, KZT, AZN, BYN,
+// UAH, AED, VND, EGP, etc.) — unlike frankfurter.app which uses ECB data
+// and dropped RUB after 2022 sanctions.
 //
 // Cache policy:
 //   - exchange_rates_cache (base, target, rate, fetched_at) is consulted first
@@ -21,12 +21,12 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isCurrencyCode } from "@/lib/currencies";
 
-const FRANKFURTER_BASE = "https://api.frankfurter.app";
+const OPEN_ER_API_BASE = "https://open.er-api.com/v6/latest";
 
-// Treat cached rate as fresh for 6 hours. Frankfurter refreshes once
-// per business day; refreshing more often inside the same day is wasted
-// traffic and gives identical numbers.
-const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+// Treat cached rate as fresh for 12 hours. The upstream refreshes once
+// a day on the free tier — anything fresher within the same day gives
+// identical numbers anyway.
+const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
 
 export type RateResult = {
   /** Multiplier: 1 unit of `base` × rate = amount in `target`. */
@@ -89,7 +89,7 @@ export async function getExchangeRate(
 
   // 2. Stale or missing — fetch live.
   try {
-    const liveRate = await fetchFrankfurterRate(baseCode, targetCode);
+    const liveRate = await fetchOpenErApiRate(baseCode, targetCode);
 
     // 3. Persist (best-effort — don't fail the user's save if this errors).
     const { error: upsertError } = await supabase.rpc("upsert_exchange_rate", {
@@ -126,22 +126,26 @@ export async function getExchangeRate(
 }
 
 /**
- * Hit frankfurter.app and parse out the single rate.
+ * Hit open.er-api.com and parse out the target rate.
  *
- * Endpoint: /latest?from=BASE&to=TARGET
- * Response: { amount: 1, base: "TRY", date: "2026-05-22", rates: { RUB: 2.45 } }
+ * Endpoint: /v6/latest/<BASE>
+ * Response (truncated):
+ *   {
+ *     "result": "success",
+ *     "base_code": "TRY",
+ *     "rates": { "USD": 0.029, "RUB": 2.45, ... }
+ *   }
+ * 404 / "error-type" responses indicate the base currency is not supported.
+ *
+ * Up to 2 attempts with a short pause — covers transient 5xx / cold-edge
+ * timeouts. 15s timeout stays well under Vercel's default function limit.
  */
-async function fetchFrankfurterRate(
+async function fetchOpenErApiRate(
   base: string,
   target: string,
 ): Promise<number> {
-  const url = `${FRANKFURTER_BASE}/latest?from=${encodeURIComponent(
-    base,
-  )}&to=${encodeURIComponent(target)}`;
+  const url = `${OPEN_ER_API_BASE}/${encodeURIComponent(base)}`;
 
-  // Up to 2 attempts: frankfurter occasionally returns 502/timeout on cold
-  // edges and recovers on the next call. 15s timeout is generous — Vercel
-  // function timeout is 10s on Hobby plans / 60s on Pro, so we stay below.
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -153,20 +157,32 @@ async function fetchFrankfurterRate(
 
       if (!response.ok) {
         throw new Error(
-          `Frankfurter responded ${response.status} for ${base}→${target}`,
+          `open.er-api.com responded ${response.status} for base ${base}`,
         );
       }
 
       const body = (await response.json()) as {
+        result?: string;
+        "error-type"?: string;
         rates?: Record<string, number>;
       };
+
+      if (body.result !== "success") {
+        throw new Error(
+          `open.er-api.com returned non-success for base ${base}: ${
+            body["error-type"] ?? "unknown"
+          }`,
+        );
+      }
 
       const rate = body.rates?.[target];
       if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) {
         throw new Error(
-          `Frankfurter returned no valid rate for ${base}→${target}: ${JSON.stringify(
-            body,
-          )}`,
+          `open.er-api.com has no valid ${base}→${target} rate (rates: ${Object.keys(
+            body.rates ?? {},
+          )
+            .slice(0, 10)
+            .join(", ")}…)`,
         );
       }
 
@@ -174,11 +190,10 @@ async function fetchFrankfurterRate(
     } catch (err) {
       lastError = err;
       console.error(
-        `[exchange-rate] frankfurter attempt ${attempt}/2 failed for ${base}→${target}`,
+        `[exchange-rate] open.er-api attempt ${attempt}/2 failed for ${base}→${target}`,
         err,
       );
       if (attempt < 2) {
-        // Short pause before retry.
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
@@ -186,5 +201,5 @@ async function fetchFrankfurterRate(
 
   throw lastError instanceof Error
     ? lastError
-    : new Error(`Frankfurter failed for ${base}→${target}`);
+    : new Error(`open.er-api.com failed for ${base}→${target}`);
 }
