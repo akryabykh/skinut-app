@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Brand } from "@/components/brand";
+import { LinkButton } from "@/components/ui/button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCurrency } from "@/lib/currencies";
 import { listProjectMembers } from "../members-actions";
 import { ROLE_LABEL_RU } from "../members-state";
 import { ProjectManagement } from "./project-management";
@@ -25,7 +28,7 @@ export default async function ProjectDetailPage({
 
   const { data: project } = await supabase
     .from("app_projects")
-    .select("id, name, share_token")
+    .select("id, name, share_token, primary_currency, secondary_currency")
     .eq("id", id)
     .maybeSingle();
 
@@ -41,36 +44,69 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
+  const primary = project.primary_currency ?? "RUB";
+  const secondary = project.secondary_currency;
+  const primaryInfo = getCurrency(primary);
+  const secondaryInfo = secondary ? getCurrency(secondary) : null;
+
   return (
-    <main className="placeholder-page">
-      <header className="topbar">
-        <Brand />
-        <Link href="/app/projects" className="nav-button">
-          ← К проектам
+    <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
+      <header className="flex items-center justify-between gap-3 mb-8">
+        <Brand href="/" />
+        <Link
+          href="/app/projects"
+          className="inline-flex items-center gap-1.5 h-10 px-3 text-[0.92rem] font-semibold text-ink hover:text-accent transition-colors"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          <span>К проектам</span>
         </Link>
       </header>
 
-      <section className="placeholder-panel">
-        <p className="eyebrow">Проект</p>
-        <h1>{project.name}</h1>
-        <p>
-          Ваша роль: <strong>{ROLE_LABEL_RU[myMembership.role]}</strong>
-        </p>
-        <Link
-          href={`/app?project=${project.id}`}
-          className="primary-button hero-button"
-        >
-          Открыть калькулятор
-        </Link>
-      </section>
+      <section className="grid gap-6">
+        <div>
+          <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted mb-2">
+            Проект
+          </p>
+          <h1 className="text-[2rem] sm:text-[2.4rem] font-bold tracking-[-0.025em] text-ink leading-tight">
+            {project.name}
+          </h1>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <span className="inline-flex items-center h-6 px-2 rounded-full bg-accent-soft text-accent-dark text-[0.72rem] font-semibold tracking-[0.02em]">
+              {primary}
+              {primaryInfo ? ` ${primaryInfo.symbol}` : ""}
+            </span>
+            {secondary && secondaryInfo ? (
+              <span className="inline-flex items-center h-6 px-2 rounded-full bg-[#F4F4F1] text-ink text-[0.72rem] font-semibold tracking-[0.02em]">
+                {secondary} {secondaryInfo.symbol}
+              </span>
+            ) : null}
+            <span className="text-[0.85rem] text-muted">
+              Ваша роль:{" "}
+              <span className="font-semibold text-ink">
+                {ROLE_LABEL_RU[myMembership.role]}
+              </span>
+            </span>
+          </div>
+          <div className="mt-5">
+            <LinkButton
+              href={`/app?project=${project.id}`}
+              variant="primary"
+              size="cta"
+            >
+              <span>Открыть калькулятор</span>
+              <ArrowRight size={18} aria-hidden="true" />
+            </LinkButton>
+          </div>
+        </div>
 
-      <ProjectManagement
-        projectId={project.id}
-        shareToken={project.share_token}
-        members={members}
-        currentUserId={user.id}
-        myRole={myMembership.role}
-      />
+        <ProjectManagement
+          projectId={project.id}
+          shareToken={project.share_token}
+          members={members}
+          currentUserId={user.id}
+          myRole={myMembership.role}
+        />
+      </section>
     </main>
   );
 }

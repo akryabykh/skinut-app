@@ -6,6 +6,11 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { Check, Copy } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { deleteProject } from "../actions";
 import {
   changeRole,
@@ -91,44 +96,64 @@ export function ProjectManagement({
 
   return (
     <>
-      <section className="placeholder-panel">
-        <h2>Участники ({members.length})</h2>
+      {/* === Members === */}
+      <Card className="!p-6">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink">
+            Участники
+          </h2>
+          <span className="inline-flex items-center h-6 px-2 rounded-full bg-[#F4F4F1] text-muted text-[0.78rem] font-semibold">
+            {members.length}
+          </span>
+        </div>
 
-        <ul className="members-list">
+        <ul className="list-none p-0 m-0 grid gap-2">
           {members.map((m) => {
             const label = memberLabel(m);
             const isMe = m.user_id === currentUserId;
             const canManageThis = isOwner && !isMe && m.role !== "owner";
 
             return (
-              <li key={m.user_id} className="members-item">
-                <div className="members-info">
-                  <strong>
+              <li
+                key={m.user_id}
+                className="flex items-center flex-wrap gap-3 border border-line rounded-card bg-paper px-4 py-3"
+              >
+                <div className="flex-1 min-w-0 grid gap-0.5">
+                  <span className="text-[0.95rem] font-semibold text-ink truncate">
                     {label}
                     {isMe ? " (вы)" : ""}
-                  </strong>
+                  </span>
                   {m.email && m.email !== label ? (
-                    <span className="meta">{m.email}</span>
+                    <span className="text-[0.82rem] text-muted truncate">
+                      {m.email}
+                    </span>
                   ) : null}
                 </div>
-                <div className="members-row-actions">
+                <div className="flex items-center gap-2 flex-wrap">
                   {canManageThis ? (
                     <form action={changeRole}>
                       <input type="hidden" name="projectId" value={projectId} />
                       <input type="hidden" name="userId" value={m.user_id} />
-                      <select
+                      <Select
                         name="role"
                         defaultValue={m.role}
                         onChange={(e) => e.currentTarget.form?.requestSubmit()}
-                        className="text-input compact-select members-role"
+                        className="!h-9 !text-[0.85rem]"
                         aria-label={`Роль участника ${label}`}
                       >
                         <option value="editor">Редактор</option>
                         <option value="viewer">Только просмотр</option>
-                      </select>
+                      </Select>
                     </form>
                   ) : (
-                    <span className={`members-role-label members-role-${m.role}`}>
+                    <span
+                      className={[
+                        "inline-flex items-center h-7 px-2.5 rounded-full text-[0.78rem] font-semibold",
+                        m.role === "owner"
+                          ? "bg-accent-soft text-accent-dark"
+                          : "bg-[#F4F4F1] text-muted",
+                      ].join(" ")}
+                    >
                       {ROLE_LABEL_RU[m.role]}
                     </span>
                   )}
@@ -141,12 +166,9 @@ export function ProjectManagement({
                     >
                       <input type="hidden" name="projectId" value={projectId} />
                       <input type="hidden" name="userId" value={m.user_id} />
-                      <button
-                        type="submit"
-                        className="ghost-button danger members-remove"
-                      >
+                      <Button type="submit" variant="danger" size="sm">
                         Убрать
-                      </button>
+                      </Button>
                     </form>
                   ) : null}
                 </div>
@@ -156,82 +178,99 @@ export function ProjectManagement({
         </ul>
 
         {isOwner ? (
-          <form action={inviteAction} className="invite-form" noValidate>
-            <p className="eyebrow">Пригласить участника</p>
+          <form
+            action={inviteAction}
+            className="mt-6 pt-6 border-t border-line grid gap-3"
+            noValidate
+          >
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
+              Пригласить участника
+            </p>
             <input type="hidden" name="projectId" value={projectId} />
-            <div className="invite-fields">
-              <label className="field">
-                <span className="field-label">Email</span>
-                <input
-                  className="text-input"
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="off"
-                />
+            <div className="grid sm:grid-cols-[2fr_1fr] gap-3">
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Email
+                </span>
+                <Input name="email" type="email" required autoComplete="off" />
               </label>
-              <label className="field">
-                <span className="field-label">Роль</span>
-                <select
-                  name="role"
-                  className="text-input compact-select"
-                  defaultValue="editor"
-                  required
-                >
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Роль
+                </span>
+                <Select name="role" defaultValue="editor" required>
                   <option value="editor">Редактор</option>
                   <option value="viewer">Только просмотр</option>
-                </select>
+                </Select>
               </label>
             </div>
             {inviteState.status === "error" && inviteState.message ? (
-              <p className="auth-banner auth-banner-error">
+              <p
+                role="alert"
+                className="rounded-control border border-danger/20 bg-[#FBEAE7] text-danger text-[0.93rem] leading-snug px-3.5 py-2.5"
+              >
                 {inviteState.message}
               </p>
             ) : null}
             {inviteState.status === "success" && inviteState.message ? (
-              <p className="auth-banner auth-banner-success">
+              <p
+                role="status"
+                className="rounded-control border border-[#F8D4C5] bg-accent-soft text-accent-dark text-[0.93rem] leading-snug px-3.5 py-2.5"
+              >
                 {inviteState.message}
               </p>
             ) : null}
-            <button
-              type="submit"
-              className="primary-button"
-              disabled={invitePending}
-            >
-              {invitePending ? "Приглашаем…" : "Пригласить"}
-            </button>
+            <div>
+              <Button type="submit" variant="primary" size="md" disabled={invitePending}>
+                {invitePending ? "Приглашаем…" : "Пригласить"}
+              </Button>
+            </div>
           </form>
         ) : null}
-      </section>
+      </Card>
 
+      {/* === Share link === */}
       {canEdit ? (
-        <section className="placeholder-panel">
-          <h2>Публичная ссылка</h2>
+        <Card className="!p-6">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-1">
+            Публичная ссылка
+          </h2>
           {shareToken ? (
             <>
-              <p>
+              <p className="text-[0.92rem] text-muted leading-snug mb-4">
                 У кого есть эта ссылка — увидит результат расчёта (итоговую
                 сумму и переводы). Деталей платежей и личных данных там нет.
               </p>
-              <div className="share-link-row">
-                <input
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                <Input
                   id="share-link-input"
-                  className="text-input share-link-input"
                   type="text"
                   readOnly
                   value={shareUrl || `…/share/${shareToken}`}
                   onFocus={(event) => event.currentTarget.select()}
+                  className="font-mono text-[0.82rem]"
                 />
-                <button
+                <Button
                   type="button"
                   onClick={copyShareUrl}
-                  className="primary-button"
+                  variant="primary"
+                  size="md"
                   disabled={!shareUrl}
                 >
-                  {shareCopied ? "Скопировано" : "Скопировать"}
-                </button>
+                  {shareCopied ? (
+                    <>
+                      <Check size={16} aria-hidden="true" />
+                      <span>Скопировано</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={16} aria-hidden="true" />
+                      <span>Скопировать</span>
+                    </>
+                  )}
+                </Button>
               </div>
-              <div className="share-actions">
+              <div className="flex flex-wrap gap-2">
                 <form
                   action={enableShare}
                   onSubmit={confirmAndProceed(
@@ -239,56 +278,61 @@ export function ProjectManagement({
                   )}
                 >
                   <input type="hidden" name="projectId" value={projectId} />
-                  <button type="submit" className="ghost-button">
+                  <Button type="submit" variant="secondary" size="sm">
                     Создать новую ссылку
-                  </button>
+                  </Button>
                 </form>
                 <form
                   action={disableShare}
                   onSubmit={confirmAndProceed("Отключить публичный доступ?")}
                 >
                   <input type="hidden" name="projectId" value={projectId} />
-                  <button type="submit" className="ghost-button danger">
+                  <Button type="submit" variant="danger" size="sm">
                     Отключить
-                  </button>
+                  </Button>
                 </form>
               </div>
             </>
           ) : (
             <>
-              <p>
+              <p className="text-[0.92rem] text-muted leading-snug mb-4">
                 Создайте ссылку, чтобы поделиться итогом расчёта с теми, у кого
                 нет аккаунта.
               </p>
               <form action={enableShare}>
                 <input type="hidden" name="projectId" value={projectId} />
-                <button type="submit" className="primary-button">
+                <Button type="submit" variant="primary" size="md">
                   Создать публичную ссылку
-                </button>
+                </Button>
               </form>
             </>
           )}
-        </section>
+        </Card>
       ) : null}
 
-      <section className="placeholder-panel danger-zone">
-        <h2>Опасная зона</h2>
+      {/* === Danger zone === */}
+      <Card className="!p-6 !border-danger/20 !bg-[#FBEAE7]/30">
+        <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-danger mb-4">
+          Опасная зона
+        </h2>
 
         {mustTransferBeforeLeaving ? (
-          <>
-            <p>
+          <div>
+            <p className="text-[0.92rem] text-muted leading-snug mb-4">
               Вы единственный владелец проекта. Передайте права другому
               участнику — после этого сможете покинуть проект.
             </p>
             <form
               action={transferOwnership}
-              className="transfer-form"
+              className="grid gap-3"
               onSubmit={(event) => {
-                const select = (event.currentTarget.elements.namedItem(
+                const select = event.currentTarget.elements.namedItem(
                   "toUserId",
-                ) as HTMLSelectElement | null);
+                ) as HTMLSelectElement | null;
                 const selectedId = select?.value ?? "";
-                const target = otherMembers.find((m) => m.user_id === selectedId);
+                const target = otherMembers.find(
+                  (m) => m.user_id === selectedId,
+                );
                 const targetLabel = target ? memberLabel(target) : "участнику";
                 if (
                   !window.confirm(
@@ -301,14 +345,11 @@ export function ProjectManagement({
               }}
             >
               <input type="hidden" name="projectId" value={projectId} />
-              <label className="field">
-                <span className="field-label">Новый владелец</span>
-                <select
-                  name="toUserId"
-                  className="text-input"
-                  required
-                  defaultValue=""
-                >
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Новый владелец
+                </span>
+                <Select name="toUserId" required defaultValue="">
                   <option value="" disabled>
                     Выберите участника
                   </option>
@@ -317,13 +358,15 @@ export function ProjectManagement({
                       {memberLabel(m)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
-              <button type="submit" className="primary-button">
-                Передать права
-              </button>
+              <div>
+                <Button type="submit" variant="primary" size="md">
+                  Передать права
+                </Button>
+              </div>
             </form>
-          </>
+          </div>
         ) : (
           <form
             action={leaveProject}
@@ -334,24 +377,21 @@ export function ProjectManagement({
             )}
           >
             <input type="hidden" name="projectId" value={projectId} />
-            <p>
+            <p className="text-[0.92rem] text-muted leading-snug mb-4">
               {members.length === 1
                 ? "Если вы покинете проект — он будет удалён, потому что других участников нет."
                 : "Вы выйдете из проекта. Доступ можно будет вернуть только через нового владельца."}
             </p>
-            <button
-              type="submit"
-              className="ghost-button danger hero-button"
-            >
+            <Button type="submit" variant="danger" size="md">
               Покинуть проект
-            </button>
+            </Button>
           </form>
         )}
 
         {isOwner ? (
           <>
-            <hr className="account-divider" />
-            <p>
+            <hr className="border-0 border-t border-danger/20 my-6" />
+            <p className="text-[0.92rem] text-muted leading-snug mb-4">
               Удаление проекта — все участники потеряют доступ, история стирается
               безвозвратно.
             </p>
@@ -362,16 +402,13 @@ export function ProjectManagement({
               )}
             >
               <input type="hidden" name="id" value={projectId} />
-              <button
-                type="submit"
-                className="ghost-button danger hero-button"
-              >
+              <Button type="submit" variant="danger" size="md">
                 Удалить проект
-              </button>
+              </Button>
             </form>
           </>
         ) : null}
-      </section>
+      </Card>
     </>
   );
 }
