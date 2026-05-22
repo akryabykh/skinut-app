@@ -1,11 +1,25 @@
-import Image from "next/image";
 import Link from "next/link";
 
-export function Brand({ href = "/" }: { href?: string }) {
+type BrandProps = {
+  href?: string;
+  className?: string;
+};
+
+/**
+ * Word-mark «Скинуться.» — Inter Tight 700 + coral dot.
+ * The original red square logo (public/logo-hero.svg) is kept only as the PWA app icon.
+ */
+export function Brand({ href = "/", className = "" }: BrandProps) {
   return (
-    <Link className="brand-link" href={href} aria-label="Скинуться">
-      <Image src="/logo.svg" width={38} height={38} alt="" priority />
+    <Link
+      className={`brand-link ${className}`.trim()}
+      href={href}
+      aria-label="Скинуться"
+    >
       <span>Скинуться</span>
+      <span className="brand-dot" aria-hidden="true">
+        .
+      </span>
     </Link>
   );
 }
