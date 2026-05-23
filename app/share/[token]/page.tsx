@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { LinkButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CategoryDonut } from "@/components/ui/category-donut";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   calculateTransfers,
@@ -200,27 +201,37 @@ export default async function PublicSharePage({
               По категориям
             </h2>
             <Card className="!p-5">
-              <div className="grid gap-2">
-                {categoryTotals.map(({ category, amount }) => (
-                  <div
-                    key={category.id}
-                    className="flex items-center justify-between gap-3"
-                  >
-                    <span
-                      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[0.85rem] font-semibold"
-                      style={{
-                        backgroundColor: category.bg,
-                        color: category.fg,
-                      }}
+              <div className="grid sm:grid-cols-[auto_1fr] items-center gap-4 sm:gap-6">
+                <CategoryDonut
+                  slices={categoryTotals}
+                  totalAmount={totalAmount}
+                  currency={primaryCurrency}
+                  size={160}
+                />
+                <div className="grid gap-2">
+                  {categoryTotals.map(({ category, amount }) => (
+                    <div
+                      key={category.id}
+                      className="flex items-center justify-between gap-3"
                     >
-                      <span aria-hidden="true">{category.emoji}</span>
-                      <span>{category.name_ru}</span>
-                    </span>
-                    <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.95rem]">
-                      {formatMoney(amount, primaryCurrency, { compact: true })}
-                    </span>
-                  </div>
-                ))}
+                      <span
+                        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[0.85rem] font-semibold"
+                        style={{
+                          backgroundColor: category.bg,
+                          color: category.fg,
+                        }}
+                      >
+                        <span aria-hidden="true">{category.emoji}</span>
+                        <span>{category.name_ru}</span>
+                      </span>
+                      <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.95rem]">
+                        {formatMoney(amount, primaryCurrency, {
+                          compact: true,
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </Card>
           </div>
