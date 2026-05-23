@@ -8,6 +8,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   calculateTransfers,
   getTotalAmount,
+  toPrimary,
   type Expense,
   type Person,
 } from "@/lib/split-calculator";
@@ -16,6 +17,11 @@ import {
   formatMoney,
   getCurrency,
 } from "@/lib/currencies";
+import {
+  CATEGORIES,
+  DEFAULT_CATEGORY,
+  isCategoryId,
+} from "@/lib/categories";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,6 +84,21 @@ export default async function PublicSharePage({
 
   const transfers = calculateTransfers(people, expenses);
   const totalAmount = getTotalAmount(expenses);
+
+  // Aggregate by category for the public summary block.
+  const categoryTotalsMap = new Map<string, number>();
+  for (const e of expenses) {
+    const cat =
+      e.category && isCategoryId(e.category) ? e.category : DEFAULT_CATEGORY;
+    categoryTotalsMap.set(
+      cat,
+      (categoryTotalsMap.get(cat) ?? 0) + toPrimary(e),
+    );
+  }
+  const categoryTotals = CATEGORIES.map((c) => ({
+    category: c,
+    amount: Math.round((categoryTotalsMap.get(c.id) ?? 0) * 100) / 100,
+  })).filter((row) => row.amount > 0);
 
   function nameOf(personId: string): string {
     return people.find((p) => p.id === personId)?.name ?? "Участник";
@@ -171,6 +192,39 @@ export default async function PublicSharePage({
             </div>
           )}
         </div>
+
+        {/* === Categories === */}
+        {categoryTotals.length > 0 ? (
+          <div>
+            <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-3">
+              По категориям
+            </h2>
+            <Card className="!p-5">
+              <div className="grid gap-2">
+                {categoryTotals.map(({ category, amount }) => (
+                  <div
+                    key={category.id}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span
+                      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[0.85rem] font-semibold"
+                      style={{
+                        backgroundColor: category.bg,
+                        color: category.fg,
+                      }}
+                    >
+                      <span aria-hidden="true">{category.emoji}</span>
+                      <span>{category.name_ru}</span>
+                    </span>
+                    <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.95rem]">
+                      {formatMoney(amount, primaryCurrency, { compact: true })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        ) : null}
 
         {/* === CTA === */}
         <Card variant="muted" className="!p-6 text-center">
