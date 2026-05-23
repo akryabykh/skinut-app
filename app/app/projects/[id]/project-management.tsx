@@ -58,6 +58,15 @@ type ProjectManagementProps = {
   expenses: Expense[];
 };
 
+// Русская плюрализация для тоста «Пересчитано N трат».
+function pluralExpenses(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "трату";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "траты";
+  return "трат";
+}
+
 // Convert the rate stored in DB (secondary→primary) into the
 // user-facing inverse "1 primary = X secondary" form. We round to a
 // reasonable number of significant digits so the input doesn't show
@@ -243,10 +252,15 @@ export function ProjectManagement({
     setCurrenciesPending(true);
     setCurrenciesStatus({ kind: "idle", message: "" });
     try {
-      await updateProjectCurrencies(formData);
+      const result = await updateProjectCurrencies(formData);
+      const baseMessage = "Валюты обновлены";
+      const detail =
+        result.recalculated > 0
+          ? `. Пересчитано ${result.recalculated} ${pluralExpenses(result.recalculated)} по новому курсу`
+          : "";
       setCurrenciesStatus({
         kind: "success",
-        message: "Валюты обновлены",
+        message: baseMessage + detail,
       });
     } catch (err) {
       setCurrenciesStatus({
@@ -598,8 +612,8 @@ export function ProjectManagement({
                   ) : null}
                 </div>
                 <p className="text-[0.78rem] text-muted leading-snug">
-                  Курс применится только к новым тратам. Старые остаются с
-                  тем курсом, по которому их добавляли.
+                  Курс применится ко всем тратам в этой валюте, включая
+                  уже добавленные — итоги пересчитаются после сохранения.
                 </p>
               </div>
             ) : (

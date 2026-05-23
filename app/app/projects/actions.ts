@@ -203,7 +203,14 @@ const editCurrenciesSchema = z.object({
 //     and by client-side schema.
 //
 // RLS does the authorization (only editor/owner can update app_projects).
-export async function updateProjectCurrencies(formData: FormData) {
+//
+// Returns the number of existing expenses that were re-stamped with the new
+// manual_rate (Block 13: смена курса в настройках пересчитывает уже
+// добавленные траты в secondary, чтобы итоги учитывали реальные комиссии
+// за конвертацию). 0 = курс не менялся или трат в secondary нет.
+export async function updateProjectCurrencies(
+  formData: FormData,
+): Promise<{ recalculated: number }> {
   const parsed = editCurrenciesSchema.safeParse({
     projectId: formData.get("projectId"),
     primary: formData.get("primary"),
@@ -242,7 +249,7 @@ export async function updateProjectCurrencies(formData: FormData) {
 
   const { data: project, error: loadError } = await supabase
     .from("app_projects")
-    .select("primary_currency, secondary_currency, payload")
+    .select("primary_currency, secondary_currency, manual_rate, payload")
     .eq("id", projectId)
     .maybeSingle();
   if (loadError || !project) {
@@ -287,16 +294,70 @@ export async function updateProjectCurrencies(formData: FormData) {
     );
   }
 
+  // Block 13: если курс реально поменялся И есть секондари — переписать
+  // exchange_rate_used у всех expenses в этой валюте. Это меняет старое
+  // правило «история заморожена» — теперь смена курса в настройках
+  // ретроактивно обновляет все траты, чтобы пользователь мог одной
+  // правкой учесть реальные комиссии за конвертацию.
+  //
+  // Сравнение значений с защитой от FP-шума: если разница меньше 1e-12,
+  // считаем что курс не менялся — не пересчитываем впустую.
+  const oldManualRate =
+    typeof project.manual_rate === "number" && project.manual_rate > 0
+      ? project.manual_rate
+      : null;
+  const rateChanged =
+    secondary !== null &&
+    manualRateForStorage !== null &&
+    (oldManualRate === null ||
+      Math.abs(oldManualRate - manualRateForStorage) > 1e-12);
+
+  let payloadForUpdate: unknown = undefined;
+  let recalculated = 0;
+
+  if (rateChanged && Array.isArray((project.payload as { expenses?: unknown })?.expenses)) {
+    const fullPayload = project.payload as {
+      expenses?: Array<Record<string, unknown>>;
+      [k: string]: unknown;
+    };
+    const updatedExpenses = (fullPayload.expenses ?? []).map((expense) => {
+      if (
+        expense &&
+        typeof expense === "object" &&
+        typeof expense.currency === "string" &&
+        expense.currency.toUpperCase() === secondary
+      ) {
+        recalculated += 1;
+        return {
+          ...expense,
+          exchange_rate_used: manualRateForStorage,
+        };
+      }
+      return expense;
+    });
+    payloadForUpdate = { ...fullPayload, expenses: updatedExpenses };
+  }
+
+  const updateRow: {
+    primary_currency: string;
+    secondary_currency: string | null;
+    manual_rate: number | null;
+    payload?: unknown;
+  } = {
+    primary_currency: primary,
+    secondary_currency: secondary,
+    // If secondary was cleared, also clear any leftover manual rate to
+    // avoid an orphan override that would re-emerge if the user adds
+    // a secondary again later.
+    manual_rate: secondary ? manualRateForStorage : null,
+  };
+  if (payloadForUpdate !== undefined) {
+    updateRow.payload = payloadForUpdate;
+  }
+
   const { error: updateError } = await supabase
     .from("app_projects")
-    .update({
-      primary_currency: primary,
-      secondary_currency: secondary,
-      // If secondary was cleared, also clear any leftover manual rate to
-      // avoid an orphan override that would re-emerge if the user adds
-      // a secondary again later.
-      manual_rate: secondary ? manualRateForStorage : null,
-    })
+    .update(updateRow as never)
     .eq("id", projectId);
 
   if (updateError) {
@@ -306,6 +367,8 @@ export async function updateProjectCurrencies(formData: FormData) {
   revalidatePath(`/app/projects/${projectId}`);
   revalidatePath("/account");
   revalidatePath("/app");
+
+  return { recalculated };
 }
 
 export async function deleteProject(formData: FormData) {
