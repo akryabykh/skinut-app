@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { Brand } from "@/components/brand";
+import { AppHeader } from "@/components/app-header/app-header";
 import { LinkButton } from "@/components/ui/button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrency } from "@/lib/currencies";
@@ -47,6 +47,20 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
+  // Load own profile for AppHeader user menu.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name, email, avatar_url")
+    .eq("id", user.id)
+    .maybeSingle();
+  const myEmail = user.email ?? profile?.email ?? "—";
+  const myFallbackName =
+    user.email && user.email.includes("@")
+      ? user.email.split("@")[0]
+      : "Пользователь";
+  const myDisplayName = profile?.display_name ?? myFallbackName;
+  const myAvatarUrl = profile?.avatar_url ?? null;
+
   const primary = project.primary_currency ?? "RUB";
   const secondary = project.secondary_currency;
   const primaryInfo = getCurrency(primary);
@@ -72,16 +86,20 @@ export default async function ProjectDetailPage({
 
   return (
     <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
-      <header className="flex items-center justify-between gap-3 mb-8">
-        <Brand href="/" />
-        <Link
-          href="/account"
-          className="inline-flex items-center gap-1.5 h-10 px-3 text-[0.92rem] font-semibold text-ink hover:text-accent transition-colors"
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-          <span>К проектам</span>
-        </Link>
-      </header>
+      <AppHeader
+        displayName={myDisplayName}
+        avatarUrl={myAvatarUrl}
+        email={myEmail}
+        active="projects"
+      />
+
+      <Link
+        href="/app/projects"
+        className="inline-flex items-center gap-1.5 mb-4 text-[0.88rem] font-semibold text-muted hover:text-ink transition-colors"
+      >
+        <ArrowLeft size={14} aria-hidden="true" />
+        <span>К списку проектов</span>
+      </Link>
 
       <section className="grid gap-6">
         <div>

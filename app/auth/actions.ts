@@ -38,6 +38,24 @@ function collectFieldErrors(error: z.ZodError): Record<string, string> {
   return out;
 }
 
+/**
+ * Decide where to send a freshly-authenticated user.
+ *
+ * Block 12 (11): a brand-new user (no projects yet) lands on /account
+ * so they can confirm their display name first. Returning users with
+ * projects skip /account and go straight to /app/projects.
+ *
+ * Reads project count through RLS — only counts projects where the user
+ * is a member, which is exactly what we want.
+ */
+export async function landingPathAfterAuth(): Promise<string> {
+  const supabase = await createSupabaseServerClient();
+  const { count } = await supabase
+    .from("app_projects")
+    .select("id", { count: "exact", head: true });
+  return (count ?? 0) > 0 ? "/app/projects" : "/account";
+}
+
 export async function signUp(
   _prev: AuthFormState,
   formData: FormData,
@@ -80,6 +98,8 @@ export async function signUp(
     };
   }
 
+  // Sign-up always lands on /account so the new user immediately sees
+  // their profile (no projects yet by definition).
   redirect("/account");
 }
 
@@ -115,7 +135,7 @@ export async function signIn(
     };
   }
 
-  redirect("/account");
+  redirect(await landingPathAfterAuth());
 }
 
 export async function signOut() {
