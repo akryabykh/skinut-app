@@ -259,7 +259,13 @@ export async function deleteProject(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/account");
+  // Block 12 polish: explicit redirect to the projects list. Without it
+  // the user stayed on /app/projects/[id] which then 404'd because the
+  // project no longer exists; or stayed on /app/projects with stale
+  // cached entry. revalidatePath('/app/projects') just busts the cache —
+  // redirect takes the user back to a safe known page.
+  revalidatePath("/app/projects");
+  redirect("/app/projects");
 }
 
 // Save the calculator's JSON state into the project row.
