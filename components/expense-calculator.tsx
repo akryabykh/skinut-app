@@ -711,6 +711,7 @@ export function ExpenseCalculator({
                 onCopyFailed={(url) =>
                   showToast(`Скопируйте вручную: ${url}`, "error")
                 }
+                onError={(message) => showToast(message, "error")}
               />
             ) : null}
             <Link
