@@ -4,6 +4,12 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  DEFAULT_PRIMARY_CURRENCY,
+  isCurrencyCode,
+  type CurrencyCode,
+} from "@/lib/currencies";
+import { getExchangeRate } from "@/lib/exchange-rate";
 
 // Helper: ensures we have a Supabase client and a logged-in user.
 // If the user isn't logged in, redirects to sign-in (NEXT_REDIRECT thrown).
@@ -18,21 +24,62 @@ async function requireUser() {
   return { supabase, user };
 }
 
-// Creates an empty project owned by the current user and redirects
-// to the calculator pointing at it. Used by:
-//   - the "+ Создать" button on /app/projects
-//   - the /app/projects/new page
+// Zod schema for the create-project form.
+// `secondary` may arrive as the empty string (when the user leaves the
+// optional select on its placeholder) — we coerce that to null.
+const createProjectSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Название обязательно")
+    .max(120, "Слишком длинное"),
+  primary: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(isCurrencyCode, "Неподдерживаемая основная валюта"),
+  secondary: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.length > 0 ? v : null))
+    .refine(
+      (v) => v === null || isCurrencyCode(v),
+      "Неподдерживаемая дополнительная валюта",
+    ),
+});
+
+// Creates a project with name + currencies and redirects to the calculator
+// pointing at it. Form-based — called from /app/projects/new which renders
+// a small form with name + primary/secondary selects.
 //
-// Implementation note: goes through a SECURITY DEFINER RPC instead of
-// a plain .insert().select(). With the membership-based RLS from Block
-// 3b, INSERT … RETURNING is evaluated BEFORE the after-insert trigger
-// that adds the creator as 'owner', so the RETURNING is hidden by the
-// SELECT policy. The RPC bypasses RLS internally and gives us the new
-// project's id reliably.
-export async function createProject() {
+// Internally goes through the SECURITY DEFINER RPC `create_app_project`
+// to bypass the RLS SELECT race condition (see Block 3b fix migration).
+export async function createProject(formData: FormData) {
+  const parsed = createProjectSchema.safeParse({
+    name: formData.get("name"),
+    primary: formData.get("primary"),
+    secondary: formData.get("secondary"),
+  });
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? "Некорректные данные");
+  }
+
+  const { name, primary, secondary } = parsed.data;
+
+  if (secondary && secondary === primary) {
+    throw new Error("Дополнительная валюта должна отличаться от основной");
+  }
+
   const { supabase } = await requireUser();
 
-  const { data: projectId, error } = await supabase.rpc("create_app_project");
+  const { data: projectId, error } = await supabase.rpc("create_app_project", {
+    p_name: name,
+    p_primary_currency: primary,
+    p_secondary_currency: secondary,
+  });
 
   if (error || !projectId) {
     throw new Error(error?.message ?? "Не удалось создать проект");
@@ -97,12 +144,15 @@ export async function deleteProject(formData: FormData) {
 }
 
 // Save the calculator's JSON state into the project row.
-// Called from the client component on debounced state changes.
-// Returns the new updated_at so the client can show "saved at".
 //
-// If payload contains projectName (which the calculator writes into it),
-// it's also mirrored into the row's `name` column. That keeps the list
-// view at /app/projects in sync with the title shown inside the calc.
+// Block 4 additions:
+//   - Server validates that each expense.currency (when present) is one
+//     of {project.primary, project.secondary}. Unknown codes → error.
+//   - For expenses paid in the secondary currency, the server fetches
+//     and records `exchange_rate_used` (multiplier → primary) at save
+//     time. Already-set rates are preserved so history doesn't drift.
+//
+// Returns the new updated_at so the client can show "saved at".
 export async function saveProjectPayload(
   id: string,
   payload: unknown,
@@ -113,13 +163,32 @@ export async function saveProjectPayload(
 
   const { supabase } = await requireUser();
 
-  const update: { payload: unknown; name?: string } = { payload };
+  // Load project's currencies so we can validate & enrich.
+  const { data: project, error: loadError } = await supabase
+    .from("app_projects")
+    .select("primary_currency, secondary_currency")
+    .eq("id", id)
+    .single();
+  if (loadError || !project) {
+    throw new Error(loadError?.message ?? "Проект не найден");
+  }
+
+  const primary = (project.primary_currency ??
+    DEFAULT_PRIMARY_CURRENCY) as CurrencyCode;
+  const secondary = project.secondary_currency as CurrencyCode | null;
+
+  const enrichedPayload = await enrichPayloadCurrencies(payload, {
+    primary,
+    secondary,
+  });
+
+  const update: { payload: unknown; name?: string } = { payload: enrichedPayload };
   if (
-    typeof payload === "object" &&
-    payload !== null &&
-    "projectName" in payload
+    typeof enrichedPayload === "object" &&
+    enrichedPayload !== null &&
+    "projectName" in enrichedPayload
   ) {
-    const candidate = (payload as { projectName: unknown }).projectName;
+    const candidate = (enrichedPayload as { projectName: unknown }).projectName;
     if (typeof candidate === "string" && candidate.trim().length > 0) {
       update.name = candidate.trim();
     }
@@ -137,4 +206,132 @@ export async function saveProjectPayload(
   }
 
   return { updatedAt: data.updated_at };
+}
+
+// Returns the current (cached or freshly fetched) exchange rate between
+// two ISO codes. Used by the calculator before adding an expense in the
+// secondary currency — the client stamps the rate onto the new expense
+// itself so the UI shows the converted-to-primary amount immediately
+// (without waiting for the next saveProjectPayload round-trip).
+//
+// Trust model: the server is the source of truth either way — when the
+// expense reaches saveProjectPayload, if a rate is already attached the
+// server preserves it (locking history); if absent, the server fetches
+// and stamps. Letting the client pre-fetch is purely a latency
+// optimisation, not a trust delegation.
+//
+// No auth required — anyone with a share-token link could also benefit
+// from the same lookup, and the upstream API is public.
+export async function fetchCurrentRate(
+  from: string,
+  to: string,
+): Promise<number> {
+  if (!isCurrencyCode(from) || !isCurrencyCode(to)) {
+    throw new Error("Неверный код валюты");
+  }
+  if (from === to) return 1;
+  const result = await getExchangeRate(from, to);
+  return result.rate;
+}
+
+// ============================================================
+// Internal: currency enrichment
+// ============================================================
+
+type EnrichContext = {
+  primary: CurrencyCode;
+  secondary: CurrencyCode | null;
+};
+
+type IncomingExpense = {
+  id?: unknown;
+  name?: unknown;
+  amount?: unknown;
+  payerId?: unknown;
+  participantIds?: unknown;
+  createdAt?: unknown;
+  currency?: unknown;
+  exchange_rate_used?: unknown;
+};
+
+async function enrichPayloadCurrencies(
+  payload: unknown,
+  ctx: EnrichContext,
+): Promise<unknown> {
+  if (typeof payload !== "object" || payload === null) {
+    return payload;
+  }
+
+  const obj = payload as { expenses?: unknown };
+  if (!Array.isArray(obj.expenses)) {
+    return payload;
+  }
+
+  const allowed = new Set<CurrencyCode>([
+    ctx.primary,
+    ...(ctx.secondary ? [ctx.secondary] : []),
+  ]);
+
+  // Cache rate lookups inside a single save — most trips have one secondary
+  // currency, so we'll fetch the rate at most once per request.
+  const rateCache = new Map<string, number>();
+
+  const enrichedExpenses = await Promise.all(
+    (obj.expenses as IncomingExpense[]).map(async (expense) => {
+      // Pass through if it's not even shaped like an expense — the
+      // upstream normalizer in the calculator will filter it anyway.
+      if (typeof expense !== "object" || expense === null) return expense;
+
+      const rawCurrency =
+        typeof expense.currency === "string" && expense.currency.trim()
+          ? expense.currency.trim().toUpperCase()
+          : ctx.primary; // legacy expense → assume primary
+
+      if (!isCurrencyCode(rawCurrency)) {
+        throw new Error(`Неизвестный код валюты: ${rawCurrency}`);
+      }
+      if (!allowed.has(rawCurrency)) {
+        throw new Error(
+          `Валюта ${rawCurrency} не настроена для этого проекта`,
+        );
+      }
+
+      // Same as primary → multiplier is exactly 1.
+      if (rawCurrency === ctx.primary) {
+        return {
+          ...expense,
+          currency: rawCurrency,
+          exchange_rate_used: 1,
+        };
+      }
+
+      // Already has a captured rate from a previous save → preserve it.
+      // This is the rule that keeps historical totals stable when the
+      // fx rate changes later.
+      const existingRate = Number(expense.exchange_rate_used);
+      if (Number.isFinite(existingRate) && existingRate > 0) {
+        return {
+          ...expense,
+          currency: rawCurrency,
+          exchange_rate_used: existingRate,
+        };
+      }
+
+      // Secondary currency, no rate yet — fetch and stamp.
+      const cacheKey = `${rawCurrency}->${ctx.primary}`;
+      let rate = rateCache.get(cacheKey);
+      if (rate === undefined) {
+        const result = await getExchangeRate(rawCurrency, ctx.primary);
+        rate = result.rate;
+        rateCache.set(cacheKey, rate);
+      }
+      return {
+        ...expense,
+        currency: rawCurrency,
+        exchange_rate_used: rate,
+      };
+    }),
+  );
+
+  return { ...obj, expenses: enrichedExpenses };
 }

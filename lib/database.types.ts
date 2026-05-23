@@ -43,6 +43,8 @@ export type Database = {
           name: string;
           payload: Json;
           share_token: string | null;
+          primary_currency: string;
+          secondary_currency: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -52,6 +54,8 @@ export type Database = {
           name?: string;
           payload?: Json;
           share_token?: string | null;
+          primary_currency?: string;
+          secondary_currency?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -61,6 +65,8 @@ export type Database = {
           name?: string;
           payload?: Json;
           share_token?: string | null;
+          primary_currency?: string;
+          secondary_currency?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -84,6 +90,27 @@ export type Database = {
           user_id?: string;
           role?: "owner" | "editor" | "viewer";
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      exchange_rates_cache: {
+        Row: {
+          base: string;
+          target: string;
+          rate: number;
+          fetched_at: string;
+        };
+        Insert: {
+          base: string;
+          target: string;
+          rate: number;
+          fetched_at?: string;
+        };
+        Update: {
+          base?: string;
+          target?: string;
+          rate?: number;
+          fetched_at?: string;
         };
         Relationships: [];
       };
@@ -111,7 +138,11 @@ export type Database = {
         Returns: undefined;
       };
       create_app_project: {
-        Args: Record<string, never>;
+        Args: {
+          p_name?: string;
+          p_primary_currency?: string;
+          p_secondary_currency?: string | null;
+        };
         Returns: string;
       };
       get_public_project_summary: {
@@ -119,8 +150,14 @@ export type Database = {
         Returns: {
           name: string;
           payload: Json;
+          primary_currency: string;
+          secondary_currency: string | null;
           updated_at: string;
         }[];
+      };
+      upsert_exchange_rate: {
+        Args: { p_base: string; p_target: string; p_rate: number };
+        Returns: undefined;
       };
     };
     Enums: { [_ in never]: never };
