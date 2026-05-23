@@ -1,4 +1,8 @@
-import { signInWithGoogle } from "@/app/auth/actions";
+"use client";
+
+import { useState } from "react";
+import { Loader2 } from "lucide-react";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 // Multi-colour official Google "G" logomark in pure SVG, no deps.
 function GoogleIcon() {
@@ -31,40 +35,89 @@ function GoogleIcon() {
 }
 
 type GoogleSignInButtonProps = {
-  /** "Войти через Google" (default) or "Регистрация через Google" */
   label?: string;
 };
 
 /**
- * Server-action button that kicks off Supabase Google OAuth flow.
+ * Client-side Google OAuth trigger.
  *
- * Implemented as `<form action={signInWithGoogle}>` (rather than an
- * onClick handler with useTransition) so it works even when JS is slow
- * to hydrate — clicking submits the form, which fires the server action,
- * which redirects to Google. No client state involved.
+ * Calls `supabase.auth.signInWithOAuth` directly from the browser — Supabase
+ * builds the `accounts.google.com/...` URL and we immediately redirect
+ * via `window.location.replace`. This is faster than the previous server-
+ * action approach (which had a server round-trip cold start of 1-2s before
+ * even hitting Google).
  *
- * Requires Google provider enabled in Supabase Dashboard with an OAuth
- * Client ID/Secret from Google Cloud Console.
+ * No `prompt: select_account` — Google will skip the chooser if the user
+ * already has a single signed-in Google account, getting them through in
+ * one tap. Multi-account users still see the chooser automatically.
+ *
+ * No `access_type: offline` — we don't use Google's refresh token; Supabase
+ * manages its own session lifecycle.
  */
 export function GoogleSignInButton({
   label = "Войти через Google",
 }: GoogleSignInButtonProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (oauthError) throw oauthError;
+      if (data?.url) {
+        window.location.assign(data.url);
+        return;
+      }
+      throw new Error("Supabase не вернул URL");
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Не удалось начать вход через Google";
+      setError(message);
+      setBusy(false);
+    }
+  }
+
   return (
-    <form action={signInWithGoogle}>
+    <div className="grid gap-2">
       <button
-        type="submit"
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
         className={[
           "w-full inline-flex items-center justify-center gap-2.5",
           "h-11 sm:h-12 px-4 rounded-control",
           "bg-white text-ink font-semibold text-[0.95rem] tracking-[-0.005em]",
           "border border-line hover:border-[#D4D4D8] hover:bg-[#F4F4F1]",
-          "transition-colors",
+          "transition-colors disabled:opacity-60 disabled:cursor-not-allowed",
           "focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         ].join(" ")}
       >
-        <GoogleIcon />
-        <span>{label}</span>
+        {busy ? (
+          <Loader2 size={18} aria-hidden="true" className="animate-spin" />
+        ) : (
+          <GoogleIcon />
+        )}
+        <span>{busy ? "Перенаправляем…" : label}</span>
       </button>
-    </form>
+      {error ? (
+        <p
+          role="alert"
+          className="rounded-control border border-danger/20 bg-[#FBEAE7] text-danger text-[0.85rem] leading-snug px-3 py-2"
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
