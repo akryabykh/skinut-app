@@ -1,6 +1,7 @@
 import { ExpenseCalculator } from "@/components/expense-calculator";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { DEFAULT_PRIMARY_CURRENCY } from "@/lib/currencies";
+import { getExchangeRate } from "@/lib/exchange-rate";
 import { listProjectMembers } from "./projects/members-actions";
 import type { Person } from "@/lib/split-calculator";
 
@@ -119,15 +120,37 @@ export default async function AppPage({ searchParams }: AppPageProps) {
     }
   }
 
+  // Block 12 polish: live secondary→primary rate for the header chip
+  // («1 ₺ ≈ 2,45 ₽»). Best-effort — getExchangeRate is cached for 12h
+  // in Supabase and the page still renders fine if the upstream is
+  // unreachable: we just hide the chip.
+  let currentRate: number | null = null;
+  const primaryCode = project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY;
+  if (project.secondary_currency && project.secondary_currency !== primaryCode) {
+    try {
+      const result = await getExchangeRate(
+        project.secondary_currency,
+        primaryCode,
+      );
+      currentRate = result.rate;
+    } catch (err) {
+      console.warn(
+        `[app/page] failed to fetch header rate ${project.secondary_currency}→${primaryCode}`,
+        err,
+      );
+    }
+  }
+
   return (
     <ExpenseCalculator
       projectId={project.id}
       initialName={project.name}
       initialPayload={workingPayload as never}
       canEdit={canEdit}
-      primaryCurrency={project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY}
+      primaryCurrency={primaryCode}
       secondaryCurrency={project.secondary_currency}
       shareToken={project.share_token}
+      currentRate={currentRate}
       userDisplayName={myDisplayName}
       userAvatarUrl={myAvatarUrl}
       userEmail={myEmail}

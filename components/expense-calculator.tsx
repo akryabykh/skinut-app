@@ -83,6 +83,10 @@ type ExpenseCalculatorProps = {
   /** Share token if the owner/editor enabled the public link. Powers the
    *  "Поделиться" button in the calculator header. */
   shareToken?: string | null;
+  /** Live secondary→primary rate captured on page load. Rendered next
+   *  to the currency toggle as «1 ₺ ≈ 2,45 ₽». null = upstream was
+   *  unreachable, hide the chip silently. */
+  currentRate?: number | null;
   /** User profile fields for the shared AppHeader. Only populated for
    *  authenticated project loads (not guest mode). */
   userDisplayName?: string;
@@ -188,6 +192,7 @@ export function ExpenseCalculator({
   primaryCurrency = DEFAULT_PRIMARY_CURRENCY,
   secondaryCurrency = null,
   shareToken = null,
+  currentRate = null,
   userDisplayName,
   userAvatarUrl = null,
   userEmail,
@@ -911,21 +916,31 @@ export function ExpenseCalculator({
                   <span className="text-[0.82rem] font-medium text-muted">
                     Валюта
                   </span>
-                  <div
-                    role="radiogroup"
-                    aria-label="Валюта расхода"
-                    className="inline-flex gap-1 rounded-control bg-[#F4F4F1] p-1 self-start"
-                  >
-                    <CurrencyToggle
-                      active={expenseCurrency === primaryCurrency}
-                      onClick={() => setExpenseCurrency(primaryCurrency)}
-                      label={`${primaryCurrency} ${primaryCurrencyInfo?.symbol ?? ""}`}
-                    />
-                    <CurrencyToggle
-                      active={expenseCurrency === secondaryCurrency}
-                      onClick={() => setExpenseCurrency(secondaryCurrency)}
-                      label={`${secondaryCurrency} ${secondaryCurrencyInfo?.symbol ?? ""}`}
-                    />
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div
+                      role="radiogroup"
+                      aria-label="Валюта расхода"
+                      className="inline-flex gap-1 rounded-control bg-[#F4F4F1] p-1"
+                    >
+                      <CurrencyToggle
+                        active={expenseCurrency === primaryCurrency}
+                        onClick={() => setExpenseCurrency(primaryCurrency)}
+                        label={`${primaryCurrency} ${primaryCurrencyInfo?.symbol ?? ""}`}
+                      />
+                      <CurrencyToggle
+                        active={expenseCurrency === secondaryCurrency}
+                        onClick={() => setExpenseCurrency(secondaryCurrency)}
+                        label={`${secondaryCurrency} ${secondaryCurrencyInfo?.symbol ?? ""}`}
+                      />
+                    </div>
+                    {currentRate && currentRate > 0 && secondaryCurrencyInfo ? (
+                      <span className="text-[0.78rem] text-muted font-mono tabular-nums whitespace-nowrap">
+                        1 {secondaryCurrencyInfo.symbol} ≈{" "}
+                        {formatMoney(currentRate, primaryCurrency, {
+                          compact: true,
+                        })}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ) : null}

@@ -4,6 +4,7 @@ import { Plus, Settings, UsersRound } from "lucide-react";
 import { AppHeader } from "@/components/app-header/app-header";
 import { LinkButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DeleteProjectButton } from "@/components/projects/delete-project-button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrency } from "@/lib/currencies";
 
@@ -72,6 +73,24 @@ export default async function ProjectsPage() {
         row.project_id,
         (memberCounts.get(row.project_id) ?? 0) + 1,
       );
+    });
+  }
+
+  // Current user's role per project — used to gate the «Удалить» button
+  // (owner-only). Editor/viewer don't see the delete button on the card;
+  // they can «Покинуть проект» from the project's settings page instead.
+  const myRoleByProject = new Map<string, "owner" | "editor" | "viewer">();
+  if (items.length > 0) {
+    const { data: myMemberships } = await supabase
+      .from("project_members")
+      .select("project_id, role")
+      .eq("user_id", user.id)
+      .in(
+        "project_id",
+        items.map((p) => p.id),
+      );
+    (myMemberships ?? []).forEach((row) => {
+      myRoleByProject.set(row.project_id, row.role);
     });
   }
 
@@ -163,7 +182,7 @@ export default async function ProjectsPage() {
                         </span>
                       </div>
                     </div>
-                    <div className="relative z-10 pt-4 mt-3 border-t border-line flex items-center justify-end">
+                    <div className="relative z-10 pt-4 mt-3 border-t border-line flex items-center justify-end gap-2">
                       <Link
                         href={`/app/projects/${project.id}`}
                         className="pointer-events-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-control border border-line bg-white text-[0.82rem] font-semibold text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors"
@@ -172,6 +191,12 @@ export default async function ProjectsPage() {
                         <Settings size={13} aria-hidden="true" />
                         <span>Настройки проекта</span>
                       </Link>
+                      {myRoleByProject.get(project.id) === "owner" ? (
+                        <DeleteProjectButton
+                          projectId={project.id}
+                          projectName={project.name}
+                        />
+                      ) : null}
                     </div>
                   </article>
                 </li>
