@@ -21,7 +21,6 @@ import {
   Receipt,
   Settings,
   Trash2,
-  UserCircle2,
   Users,
   WalletCards,
   X,
@@ -35,6 +34,7 @@ import { useConfirm } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { CategoryDonut } from "@/components/ui/category-donut";
 import { ShareProjectButton } from "@/components/share-project-button";
+import { AppHeader } from "@/components/app-header/app-header";
 import {
   fetchCurrentRate,
   saveProjectPayload,
@@ -83,6 +83,11 @@ type ExpenseCalculatorProps = {
   /** Share token if the owner/editor enabled the public link. Powers the
    *  "Поделиться" button in the calculator header. */
   shareToken?: string | null;
+  /** User profile fields for the shared AppHeader. Only populated for
+   *  authenticated project loads (not guest mode). */
+  userDisplayName?: string;
+  userAvatarUrl?: string | null;
+  userEmail?: string;
 };
 
 type SyncStatus = "idle" | "saving" | "saved" | "error";
@@ -183,6 +188,9 @@ export function ExpenseCalculator({
   primaryCurrency = DEFAULT_PRIMARY_CURRENCY,
   secondaryCurrency = null,
   shareToken = null,
+  userDisplayName,
+  userAvatarUrl = null,
+  userEmail,
 }: ExpenseCalculatorProps = {}) {
   const isOwnedProject = Boolean(projectId);
   const isReadOnly = !canEdit;
@@ -665,18 +673,35 @@ export function ExpenseCalculator({
 
   return (
     <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
-      {/* === Header === */}
-      <header className="flex items-center justify-between gap-3 mb-6 flex-wrap">
-        <div className="grid gap-1 min-w-0">
-          <div className="flex items-center gap-3">
+      {/* === Top app header — only for authenticated project loads === */}
+      {isOwnedProject && userDisplayName && userEmail ? (
+        <AppHeader
+          displayName={userDisplayName}
+          avatarUrl={userAvatarUrl}
+          email={userEmail}
+          active="projects"
+        />
+      ) : (
+        // Guest mode: simple branding only.
+        <header className="flex items-center mb-8">
+          <div className="grid gap-1">
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
               Калькулятор расходов
             </p>
-            {isOwnedProject ? <SyncIndicator status={syncStatus} /> : null}
+            <Brand href="/" />
           </div>
-          <Brand href={isOwnedProject ? "/account" : "/"} />
-        </div>
-        {isOwnedProject && projectId ? (
+        </header>
+      )}
+
+      {/* === Project actions bar — sync state + share + settings === */}
+      {isOwnedProject && projectId ? (
+        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+          <div className="flex items-center gap-3 min-w-0">
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
+              Калькулятор
+            </p>
+            <SyncIndicator status={syncStatus} />
+          </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {canEdit ? (
               <ShareProjectButton
@@ -689,16 +714,6 @@ export function ExpenseCalculator({
               />
             ) : null}
             <Link
-              href="/account"
-              className="inline-flex items-center justify-center h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors gap-1.5"
-              aria-label="Личный кабинет"
-            >
-              <UserCircle2 size={16} aria-hidden="true" />
-              <span className="hidden sm:inline text-[0.88rem] font-semibold">
-                Личный кабинет
-              </span>
-            </Link>
-            <Link
               href={`/app/projects/${projectId}`}
               className="inline-flex items-center justify-center h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors gap-1.5"
               aria-label="Настройки проекта"
@@ -709,8 +724,8 @@ export function ExpenseCalculator({
               </span>
             </Link>
           </div>
-        ) : null}
-      </header>
+        </div>
+      ) : null}
 
       {isReadOnly ? (
         <p
