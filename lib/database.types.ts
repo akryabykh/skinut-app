@@ -48,6 +48,7 @@ export type Database = {
           share_token: string | null;
           primary_currency: string;
           secondary_currency: string | null;
+          manual_rate: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -59,6 +60,7 @@ export type Database = {
           share_token?: string | null;
           primary_currency?: string;
           secondary_currency?: string | null;
+          manual_rate?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -70,6 +72,7 @@ export type Database = {
           share_token?: string | null;
           primary_currency?: string;
           secondary_currency?: string | null;
+          manual_rate?: number | null;
           created_at?: string;
           updated_at?: string;
         };

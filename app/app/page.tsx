@@ -1,6 +1,7 @@
 import { ExpenseCalculator } from "@/components/expense-calculator";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { DEFAULT_PRIMARY_CURRENCY } from "@/lib/currencies";
+import { getExchangeRate } from "@/lib/exchange-rate";
 import { listProjectMembers } from "./projects/members-actions";
 import type { Person } from "@/lib/split-calculator";
 
@@ -38,7 +39,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   const { data: project } = await supabase
     .from("app_projects")
     .select(
-      "id, name, payload, primary_currency, secondary_currency, share_token",
+      "id, name, payload, primary_currency, secondary_currency, manual_rate, share_token",
     )
     .eq("id", projectId)
     .maybeSingle();
@@ -119,15 +120,57 @@ export default async function AppPage({ searchParams }: AppPageProps) {
     }
   }
 
+  // Правило: курс зафиксирован на проекте при создании (поле manual_rate,
+  // см. миграцию 20260523000002_manual_rate.sql). Калькулятор просто
+  // читает зафиксированное значение — никакого live-fetch здесь нет,
+  // чтобы расхождение между «вижу в шапке» и «застамплено на трате»
+  // было невозможно.
+  //
+  // Для legacy-проектов (созданных до фиксации правила) делаем разовый
+  // backfill: если есть secondary, но manual_rate is null — фетчим и
+  // обновляем проект, чтобы дальше работала единая логика. Best-effort:
+  // если апстрим недоступен, currentRate остаётся null, хинт скрыт,
+  // owner увидит на следующем открытии или подставит курс вручную.
+  let currentRate: number | null = null;
+  const primaryCode = project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY;
+  if (project.secondary_currency && project.secondary_currency !== primaryCode) {
+    if (
+      typeof project.manual_rate === "number" &&
+      project.manual_rate > 0
+    ) {
+      currentRate = project.manual_rate;
+    } else if (canEdit) {
+      try {
+        const result = await getExchangeRate(
+          project.secondary_currency,
+          primaryCode,
+        );
+        currentRate = result.rate;
+        // Lazy backfill — фиксируем курс на проекте, чтобы это был
+        // последний раз, когда мы дёрнули live API для этого проекта.
+        await supabase
+          .from("app_projects")
+          .update({ manual_rate: currentRate })
+          .eq("id", project.id);
+      } catch (err) {
+        console.warn(
+          `[app/page] backfill manual_rate ${project.secondary_currency}→${primaryCode} failed`,
+          err,
+        );
+      }
+    }
+  }
+
   return (
     <ExpenseCalculator
       projectId={project.id}
       initialName={project.name}
       initialPayload={workingPayload as never}
       canEdit={canEdit}
-      primaryCurrency={project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY}
+      primaryCurrency={primaryCode}
       secondaryCurrency={project.secondary_currency}
       shareToken={project.share_token}
+      currentRate={currentRate}
       userDisplayName={myDisplayName}
       userAvatarUrl={myAvatarUrl}
       userEmail={myEmail}

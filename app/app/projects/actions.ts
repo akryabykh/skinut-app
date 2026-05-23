@@ -85,6 +85,26 @@ export async function createProject(formData: FormData) {
     throw new Error(error?.message ?? "Не удалось создать проект");
   }
 
+  // Правило: курс фиксируется один раз — при создании проекта.
+  // Делаем разовый live-fetch и записываем в manual_rate. Дальше курс
+  // никогда не пересчитывается автоматически — только вручную в
+  // настройках. Если апстрим недоступен → проект создаётся без курса,
+  // подсосётся lazily при первом открытии калькулятора.
+  if (secondary && secondary !== primary) {
+    try {
+      const result = await getExchangeRate(secondary, primary);
+      await supabase
+        .from("app_projects")
+        .update({ manual_rate: result.rate })
+        .eq("id", projectId);
+    } catch (err) {
+      console.warn(
+        `[createProject] failed to lock initial rate ${secondary}→${primary} for ${projectId}`,
+        err,
+      );
+    }
+  }
+
   revalidatePath("/account");
   redirect(`/app?project=${projectId}`);
 }
@@ -124,6 +144,12 @@ const deleteSchema = z.object({
 // Schema for editing the primary/secondary currency of an existing project.
 // Same currency-validation rules as createProjectSchema; we just guard
 // projectId as uuid here.
+//
+// `manualRate` arrives as a string from the input — the user enters X in
+// "1 primary = X secondary" form (human-readable). We convert to a positive
+// number, leaving "" / undefined as null (= "no manual override, use live").
+// We store the inverse (secondary→primary direction) below in
+// updateProjectCurrencies — this schema only parses the user-facing value.
 const editCurrenciesSchema = z.object({
   projectId: z.string().uuid(),
   primary: z
@@ -141,6 +167,25 @@ const editCurrenciesSchema = z.object({
     .refine(
       (v) => v === null || isCurrencyCode(v),
       "Неподдерживаемая дополнительная валюта",
+    ),
+  // User-facing rate: "1 primary = X secondary". May be empty/missing.
+  manualRateDisplay: z
+    .string()
+    .trim()
+    .optional()
+    .nullable()
+    .transform((v) => {
+      if (v === null || v === undefined || v === "") return null;
+      // Accept both "," and "." as decimal separators (RU locale users
+      // routinely type "0,40" in number inputs that allow it).
+      const normalized = v.replace(",", ".");
+      const num = Number(normalized);
+      if (!Number.isFinite(num)) return Number.NaN;
+      return num;
+    })
+    .refine(
+      (v) => v === null || (Number.isFinite(v) && v > 0),
+      "Курс должен быть положительным числом",
     ),
 });
 
@@ -163,15 +208,34 @@ export async function updateProjectCurrencies(formData: FormData) {
     projectId: formData.get("projectId"),
     primary: formData.get("primary"),
     secondary: formData.get("secondary"),
+    manualRateDisplay: formData.get("manualRateDisplay"),
   });
   if (!parsed.success) {
     throw new Error(parsed.error.issues[0]?.message ?? "Некорректные данные");
   }
 
-  const { projectId, primary, secondary } = parsed.data;
+  const { projectId, primary, secondary, manualRateDisplay } = parsed.data;
 
   if (secondary && secondary === primary) {
     throw new Error("Дополнительная валюта должна отличаться от основной");
+  }
+
+  // The user-facing input was "1 primary = X secondary". We store the
+  // inverse (rate(secondary → primary)) so it lines up with the convention
+  // used on every saved expense's `exchange_rate_used`. No secondary →
+  // no manual override (nullable column, value gets cleared below).
+  let manualRateForStorage: number | null = null;
+  if (manualRateDisplay !== null && manualRateDisplay !== undefined) {
+    if (!secondary) {
+      throw new Error(
+        "Курс можно задать только если выбрана дополнительная валюта",
+      );
+    }
+    if (!(manualRateDisplay > 0)) {
+      throw new Error("Курс должен быть положительным числом");
+    }
+    // 1 primary = X secondary  ⇒  1 secondary = (1/X) primary
+    manualRateForStorage = 1 / manualRateDisplay;
   }
 
   const { supabase } = await requireUser();
@@ -228,6 +292,10 @@ export async function updateProjectCurrencies(formData: FormData) {
     .update({
       primary_currency: primary,
       secondary_currency: secondary,
+      // If secondary was cleared, also clear any leftover manual rate to
+      // avoid an orphan override that would re-emerge if the user adds
+      // a secondary again later.
+      manual_rate: secondary ? manualRateForStorage : null,
     })
     .eq("id", projectId);
 
@@ -259,7 +327,13 @@ export async function deleteProject(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/account");
+  // Block 12 polish: explicit redirect to the projects list. Without it
+  // the user stayed on /app/projects/[id] which then 404'd because the
+  // project no longer exists; or stayed on /app/projects with stale
+  // cached entry. revalidatePath('/app/projects') just busts the cache —
+  // redirect takes the user back to a safe known page.
+  revalidatePath("/app/projects");
+  redirect("/app/projects");
 }
 
 // Save the calculator's JSON state into the project row.
@@ -285,7 +359,7 @@ export async function saveProjectPayload(
   // Load project's currencies so we can validate & enrich.
   const { data: project, error: loadError } = await supabase
     .from("app_projects")
-    .select("primary_currency, secondary_currency")
+    .select("primary_currency, secondary_currency, manual_rate")
     .eq("id", id)
     .single();
   if (loadError || !project) {
@@ -295,10 +369,35 @@ export async function saveProjectPayload(
   const primary = (project.primary_currency ??
     DEFAULT_PRIMARY_CURRENCY) as CurrencyCode;
   const secondary = project.secondary_currency as CurrencyCode | null;
+  let manualRate =
+    typeof project.manual_rate === "number" && project.manual_rate > 0
+      ? project.manual_rate
+      : null;
+
+  // Safety net для legacy: если проект с secondary, но manual_rate ещё
+  // не зафиксирован (старый проект, не прошедший backfill в /app), —
+  // фетчим и записываем здесь. Один раз. Это гарантирует, что любая
+  // следующая трата в secondary встретит уже зафиксированный курс.
+  if (secondary && manualRate === null && secondary !== primary) {
+    try {
+      const result = await getExchangeRate(secondary, primary);
+      manualRate = result.rate;
+      await supabase
+        .from("app_projects")
+        .update({ manual_rate: manualRate })
+        .eq("id", id);
+    } catch (err) {
+      console.warn(
+        `[saveProjectPayload] late backfill manual_rate ${secondary}→${primary} failed`,
+        err,
+      );
+    }
+  }
 
   const enrichedPayload = await enrichPayloadCurrencies(payload, {
     primary,
     secondary,
+    manualRate,
   });
 
   const update: { payload: unknown; name?: string } = { payload: enrichedPayload };
@@ -344,11 +443,42 @@ export async function saveProjectPayload(
 export async function fetchCurrentRate(
   from: string,
   to: string,
+  projectId?: string,
 ): Promise<number> {
   if (!isCurrencyCode(from) || !isCurrencyCode(to)) {
     throw new Error("Неверный код валюты");
   }
   if (from === to) return 1;
+
+  // If a projectId is provided and the project has a manual override
+  // matching this direction (secondary → primary), use it instead of
+  // hitting the live API. Keeps trip-conversion-fee assumptions stable.
+  if (projectId) {
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data: project } = await supabase
+        .from("app_projects")
+        .select("primary_currency, secondary_currency, manual_rate")
+        .eq("id", projectId)
+        .maybeSingle();
+      if (
+        project &&
+        typeof project.manual_rate === "number" &&
+        project.manual_rate > 0 &&
+        project.secondary_currency === from &&
+        (project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY) === to
+      ) {
+        return project.manual_rate;
+      }
+    } catch (err) {
+      // Non-fatal — fall through to the live fetch below.
+      console.warn(
+        `[fetchCurrentRate] manual_rate lookup failed for project ${projectId}`,
+        err,
+      );
+    }
+  }
+
   const result = await getExchangeRate(from, to);
   return result.rate;
 }
@@ -360,6 +490,10 @@ export async function fetchCurrentRate(
 type EnrichContext = {
   primary: CurrencyCode;
   secondary: CurrencyCode | null;
+  // Optional project-level override (secondary→primary direction). When
+  // present and the expense has no rate yet, we stamp this instead of
+  // calling the live FX API.
+  manualRate?: number | null;
 };
 
 type IncomingExpense = {
@@ -436,18 +570,26 @@ async function enrichPayloadCurrencies(
         };
       }
 
-      // Secondary currency, no rate yet — fetch and stamp.
-      const cacheKey = `${rawCurrency}->${ctx.primary}`;
-      let rate = rateCache.get(cacheKey);
-      if (rate === undefined) {
-        const result = await getExchangeRate(rawCurrency, ctx.primary);
-        rate = result.rate;
-        rateCache.set(cacheKey, rate);
+      // Secondary currency, no rate yet — стампим **только** проектный
+      // курс. Никакого live-fetch: правило в том, что курс фиксируется
+      // при создании проекта (см. createProject + lazy backfill в
+      // /app/page.tsx + safety net выше). Если manual_rate всё ещё
+      // отсутствует — все три backfill-точки провалили fetch, и это
+      // ошибка, которую видит пользователь («поправьте курс в
+      // настройках»). Без этого мы бы вернулись к динамике рынка.
+      if (
+        !ctx.manualRate ||
+        !ctx.secondary ||
+        rawCurrency !== ctx.secondary
+      ) {
+        throw new Error(
+          `Курс для ${rawCurrency} не зафиксирован на проекте. Откройте «Настройки проекта» и подставьте курс.`,
+        );
       }
       return {
         ...expense,
         currency: rawCurrency,
-        exchange_rate_used: rate,
+        exchange_rate_used: ctx.manualRate,
       };
     }),
   );

@@ -3,6 +3,7 @@
 import {
   useActionState,
   useEffect,
+  useMemo,
   useState,
   type FormEvent,
 } from "react";
@@ -13,8 +14,12 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/modal";
-import { deleteProject, updateProjectCurrencies } from "../actions";
-import { CURRENCIES } from "@/lib/currencies";
+import {
+  deleteProject,
+  fetchCurrentRate,
+  updateProjectCurrencies,
+} from "../actions";
+import { CURRENCIES, getCurrency } from "@/lib/currencies";
 import { getCategory } from "@/lib/categories";
 import {
   toPrimary,
@@ -45,10 +50,25 @@ type ProjectManagementProps = {
   myRole: MemberRole;
   primaryCurrency: string;
   secondaryCurrency: string | null;
+  // Stored as rate(secondary → primary). null when no override is set
+  // and the live rate from open.er-api should be shown instead.
+  manualRate: number | null;
   hasExpenses: boolean;
   people: Person[];
   expenses: Expense[];
 };
+
+// Convert the rate stored in DB (secondary→primary) into the
+// user-facing inverse "1 primary = X secondary" form. We round to a
+// reasonable number of significant digits so the input doesn't show
+// hideous floating-point noise like 0.4000000000000001.
+function rateToDisplayForm(rateSecondaryToPrimary: number): string {
+  const inverse = 1 / rateSecondaryToPrimary;
+  if (!Number.isFinite(inverse) || inverse <= 0) return "";
+  // 4 sig-figs is enough for everyday rates; tweak if a currency pair
+  // needs more (e.g. 1 JPY = 0.0066 USD already round-trips fine).
+  return inverse.toPrecision(4).replace(/\.?0+$/, "");
+}
 
 function memberLabel(m: MemberInfo): string {
   return m.display_name ?? m.email ?? "Без имени";
@@ -123,6 +143,7 @@ export function ProjectManagement({
   myRole,
   primaryCurrency,
   secondaryCurrency,
+  manualRate,
   hasExpenses,
   people,
   expenses,
@@ -148,6 +169,72 @@ export function ProjectManagement({
     message: string;
   }>({ kind: "idle", message: "" });
   const [currenciesPending, setCurrenciesPending] = useState(false);
+
+  // Selected secondary in the form (controlled so the rate hint reacts to
+  // changes before the form is saved). Initial value matches the server-
+  // side stored secondary.
+  const [selectedSecondary, setSelectedSecondary] = useState<string>(
+    secondaryCurrency ?? "",
+  );
+  const [selectedPrimary, setSelectedPrimary] = useState<string>(
+    primaryCurrency,
+  );
+
+  // Курс проекта: вводится как "1 primary = X secondary", хранится в БД
+  // как secondary→primary (1/X). Правило: курс лочится один раз при
+  // создании проекта; здесь — единственное место, где его можно поменять.
+  const [manualRateInput, setManualRateInput] = useState<string>(
+    manualRate ? rateToDisplayForm(manualRate) : "",
+  );
+
+  // Текущий рыночный курс — только для справки и для кнопки «Подставить
+  // рыночный». Никаких автоматических подстановок: пользователь должен
+  // явно нажать, чтобы перезаписать зафиксированный курс.
+  const [marketRate, setMarketRate] = useState<number | null>(null);
+  const [marketRateLoading, setMarketRateLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sec = selectedSecondary;
+    const prim = selectedPrimary;
+    if (!sec || sec === prim) {
+      setMarketRate(null);
+      return;
+    }
+    setMarketRateLoading(true);
+    fetchCurrentRate(sec, prim)
+      .then((rate) => {
+        if (!cancelled) setMarketRate(rate);
+      })
+      .catch(() => {
+        if (!cancelled) setMarketRate(null);
+      })
+      .finally(() => {
+        if (!cancelled) setMarketRateLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSecondary, selectedPrimary]);
+
+  // Парсим то, что введено в инпуте, обратно в secondary→primary
+  // направление — для построения подсказки «1 primary = X secondary»
+  // прямо в форме (live preview).
+  const inputAsStoredRate = useMemo<number | null>(() => {
+    const x = Number(manualRateInput.replace(",", "."));
+    if (Number.isFinite(x) && x > 0) return 1 / x;
+    return null;
+  }, [manualRateInput]);
+
+  const primaryInfo = getCurrency(selectedPrimary);
+  const secondaryInfo = selectedSecondary
+    ? getCurrency(selectedSecondary)
+    : null;
+
+  // Удобный форматтер «X secondary» для market-rate подсказки.
+  function formatInverseAsSecondary(rateSecondaryToPrimary: number): string {
+    return (1 / rateSecondaryToPrimary).toPrecision(4).replace(/\.?0+$/, "");
+  }
 
   async function handleCurrenciesSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -381,15 +468,29 @@ export function ProjectManagement({
           </p>
           <form onSubmit={handleCurrenciesSubmit} className="grid gap-3">
             <input type="hidden" name="projectId" value={projectId} />
+            {/* Important: `disabled` на <select> исключает поле из
+                FormData, и Zod на сервере падает с «Неподдерживаемая
+                основная валюта». Поэтому когда primary заблокирован
+                (в проекте уже есть траты), кладём значение в hidden
+                input, а сам Select оставляем только для отображения. */}
+            {hasExpenses ? (
+              <input
+                type="hidden"
+                name="primary"
+                value={selectedPrimary}
+                readOnly
+              />
+            ) : null}
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="grid gap-1.5">
                 <span className="text-[0.82rem] font-medium text-muted">
                   Основная валюта
                 </span>
                 <Select
-                  name="primary"
-                  defaultValue={primaryCurrency}
-                  required
+                  name={hasExpenses ? undefined : "primary"}
+                  value={selectedPrimary}
+                  onChange={(e) => setSelectedPrimary(e.target.value)}
+                  required={!hasExpenses}
                   disabled={hasExpenses}
                 >
                   {CURRENCIES.map((c) => (
@@ -409,7 +510,11 @@ export function ProjectManagement({
                 <span className="text-[0.82rem] font-medium text-muted">
                   Дополнительная
                 </span>
-                <Select name="secondary" defaultValue={secondaryCurrency ?? ""}>
+                <Select
+                  name="secondary"
+                  value={selectedSecondary}
+                  onChange={(e) => setSelectedSecondary(e.target.value)}
+                >
                   <option value="">— Не нужна</option>
                   {CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>
@@ -422,6 +527,92 @@ export function ProjectManagement({
                 </span>
               </label>
             </div>
+
+            {/* Курс проекта. Правило: фиксируется один раз при создании
+                проекта. Здесь можно поправить руками — например, чтобы
+                заложить средние комиссии за конвертацию. Никакого
+                автоматического пересчёта при изменении рыночного курса
+                нет — это и есть смысл «фиксированного» курса. */}
+            {selectedSecondary && selectedSecondary !== selectedPrimary ? (
+              <div className="rounded-control border border-line bg-paper p-3.5 grid gap-2.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Курс проекта
+                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[0.92rem] font-mono tabular-nums text-ink whitespace-nowrap">
+                    1 {primaryInfo?.symbol ?? selectedPrimary} =
+                  </span>
+                  <Input
+                    name="manualRateDisplay"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={
+                      marketRate ? formatInverseAsSecondary(marketRate) : ""
+                    }
+                    value={manualRateInput}
+                    onChange={(e) => setManualRateInput(e.target.value)}
+                    className="!w-28 font-mono tabular-nums"
+                    autoComplete="off"
+                  />
+                  <span className="text-[0.92rem] font-mono tabular-nums text-ink whitespace-nowrap">
+                    {secondaryInfo?.symbol ?? selectedSecondary}
+                  </span>
+                </div>
+                {inputAsStoredRate && manualRateInput ? (
+                  <span className="text-[0.78rem] text-muted">
+                    Эквивалент: 1{" "}
+                    {secondaryInfo?.symbol ?? selectedSecondary} ={" "}
+                    <span className="font-mono tabular-nums">
+                      {inputAsStoredRate.toPrecision(4).replace(/\.?0+$/, "")}
+                    </span>{" "}
+                    {primaryInfo?.symbol ?? selectedPrimary}
+                  </span>
+                ) : null}
+                <div className="flex items-center justify-between gap-3 flex-wrap pt-1 border-t border-line">
+                  <span className="text-[0.78rem] text-muted whitespace-nowrap">
+                    {marketRateLoading ? (
+                      "Рыночный курс: загрузка…"
+                    ) : marketRate ? (
+                      <>
+                        Рыночный курс сейчас:{" "}
+                        <span className="font-mono tabular-nums text-ink">
+                          1 {primaryInfo?.symbol ?? selectedPrimary} ={" "}
+                          {formatInverseAsSecondary(marketRate)}{" "}
+                          {secondaryInfo?.symbol ?? selectedSecondary}
+                        </span>
+                      </>
+                    ) : (
+                      "Рыночный курс недоступен"
+                    )}
+                  </span>
+                  {marketRate ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setManualRateInput(formatInverseAsSecondary(marketRate))
+                      }
+                      className="text-[0.78rem] font-semibold text-ink hover:underline underline-offset-2"
+                    >
+                      Подставить рыночный
+                    </button>
+                  ) : null}
+                </div>
+                <p className="text-[0.78rem] text-muted leading-snug">
+                  Курс применится только к новым тратам. Старые остаются с
+                  тем курсом, по которому их добавляли.
+                </p>
+              </div>
+            ) : (
+              // На случай, если secondary убрали — гарантируем, что
+              // в FormData всё равно прилетит пустое значение.
+              <input
+                type="hidden"
+                name="manualRateDisplay"
+                value=""
+                readOnly
+              />
+            )}
+
             {currenciesStatus.kind === "error" ? (
               <p
                 role="alert"
