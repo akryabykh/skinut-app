@@ -6,7 +6,8 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Download, FileText } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,12 @@ import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/modal";
 import { deleteProject, updateProjectCurrencies } from "../actions";
 import { CURRENCIES } from "@/lib/currencies";
+import { getCategory } from "@/lib/categories";
+import {
+  toPrimary,
+  type Expense,
+  type Person,
+} from "@/lib/split-calculator";
 import {
   changeRole,
   inviteMember,
@@ -31,6 +38,7 @@ import {
 
 type ProjectManagementProps = {
   projectId: string;
+  projectName: string;
   shareToken: string | null;
   members: MemberInfo[];
   currentUserId: string;
@@ -38,14 +46,77 @@ type ProjectManagementProps = {
   primaryCurrency: string;
   secondaryCurrency: string | null;
   hasExpenses: boolean;
+  people: Person[];
+  expenses: Expense[];
 };
 
 function memberLabel(m: MemberInfo): string {
   return m.display_name ?? m.email ?? "Без имени";
 }
 
+// Build a CSV string of the project's expenses. UTF-8 with BOM (for Excel),
+// double-quote escaping. Header row in Russian.
+function buildCsv(
+  expenses: Expense[],
+  people: Person[],
+  primaryCurrency: string,
+): string {
+  const personById = new Map(people.map((p) => [p.id, p.name]));
+  const header = [
+    "Дата",
+    "Название",
+    "Сумма",
+    "Валюта",
+    `В ${primaryCurrency}`,
+    "Категория",
+    "Плательщик",
+    "Участники",
+  ];
+  const rows = expenses.map((e) => {
+    const cat = getCategory(e.category);
+    const inPrimary = toPrimary(e);
+    return [
+      e.createdAt ? new Date(e.createdAt).toLocaleDateString("ru-RU") : "",
+      e.name,
+      e.amount.toString(),
+      e.currency ?? primaryCurrency,
+      inPrimary.toFixed(2),
+      cat.name_ru,
+      personById.get(e.payerId) ?? "—",
+      e.participantIds.map((id) => personById.get(id) ?? "—").join("; "),
+    ];
+  });
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  return [header, ...rows]
+    .map((row) => row.map(escape).join(","))
+    .join("\n");
+}
+
+function downloadAsFile(filename: string, content: string, mime: string) {
+  // UTF-8 BOM so Excel opens Russian CSVs correctly.
+  const blob = new Blob(["﻿" + content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function safeFilename(s: string): string {
+  return (
+    s
+      .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+      .replace(/\s+/g, "_")
+      .toLowerCase() || "project"
+  );
+}
+
 export function ProjectManagement({
   projectId,
+  projectName,
   shareToken,
   members,
   currentUserId,
@@ -53,6 +124,8 @@ export function ProjectManagement({
   primaryCurrency,
   secondaryCurrency,
   hasExpenses,
+  people,
+  expenses,
 }: ProjectManagementProps) {
   const isOwner = myRole === "owner";
   const canEdit = myRole === "owner" || myRole === "editor";
@@ -465,6 +538,49 @@ export function ProjectManagement({
               </form>
             </>
           )}
+        </Card>
+      ) : null}
+
+      {/* === Export === */}
+      {hasExpenses ? (
+        <Card className="!p-6">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-1">
+            Экспорт
+          </h2>
+          <p className="text-[0.92rem] text-muted leading-snug mb-4">
+            Скачайте список трат в CSV для Excel/Google Sheets или откройте
+            печатный отчёт со всеми расчётами.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="primary"
+              size="md"
+              onClick={() => {
+                const csv = buildCsv(expenses, people, primaryCurrency);
+                downloadAsFile(
+                  `${safeFilename(projectName)}.csv`,
+                  csv,
+                  "text/csv;charset=utf-8",
+                );
+              }}
+            >
+              <Download size={16} aria-hidden="true" />
+              <span>Скачать CSV</span>
+            </Button>
+            <Link
+              href={`/app/projects/${projectId}/report`}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex items-center justify-center gap-2 rounded-control font-semibold tracking-[-0.005em] h-11 sm:h-10 px-4 text-[0.95rem] bg-white text-ink border border-line hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors"
+            >
+              <FileText size={16} aria-hidden="true" />
+              <span>Открыть отчёт</span>
+            </Link>
+          </div>
+          <p className="text-[0.78rem] text-muted mt-3">
+            В отчёте нажмите ⌘P / Ctrl+P, чтобы сохранить как PDF.
+          </p>
         </Card>
       ) : null}
 
