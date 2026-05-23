@@ -9,8 +9,26 @@ import {
   useRef,
   useState,
 } from "react";
-import { ListChecks, Receipt, Settings, UserCircle2, Users, WalletCards } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronDown,
+  ListChecks,
+  Plus,
+  Receipt,
+  Settings,
+  Trash2,
+  UserCircle2,
+  Users,
+  WalletCards,
+  X,
+} from "lucide-react";
 import { Brand } from "@/components/brand";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { useConfirm } from "@/components/ui/modal";
+import { useToast } from "@/components/ui/toast";
 import {
   fetchCurrentRate,
   saveProjectPayload,
@@ -44,24 +62,11 @@ type ProjectState = {
 };
 
 type ExpenseCalculatorProps = {
-  // When a project is loaded from the DB, the parent server component
-  // passes its id, initial title and payload here. The calculator then
-  // persists every change back to that row via saveProjectPayload().
-  //
-  // When the props are omitted (guest mode, no auth), the calculator
-  // falls back to localStorage just like the legacy version.
   projectId?: string;
   initialName?: string;
   initialPayload?: Partial<ProjectState>;
-  // Defaults to true for backward compatibility. Set to false when the
-  // current user has the "viewer" role on this project — the UI becomes
-  // a read-only snapshot and persistState becomes a noop.
   canEdit?: boolean;
-  // Block 4: project's primary currency (settlement currency). All totals
-  // and transfers are displayed in this. Defaults to RUB for guest mode.
   primaryCurrency?: string;
-  // Optional secondary currency for trips abroad. When present, the
-  // expense form shows a segmented switch between primary/secondary.
   secondaryCurrency?: string | null;
 };
 
@@ -77,14 +82,17 @@ const DEFAULT_STATE: ProjectState = {
 function plural(count: number, one: string, few: string, many: string) {
   const mod10 = count % 10;
   const mod100 = count % 100;
-
   if (mod10 === 1 && mod100 !== 11) return one;
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
   return many;
 }
 
 function makeId() {
-  if (typeof window !== "undefined" && "crypto" in window && "randomUUID" in window.crypto) {
+  if (
+    typeof window !== "undefined" &&
+    "crypto" in window &&
+    "randomUUID" in window.crypto
+  ) {
     return window.crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -98,10 +106,14 @@ function getValidExpenseSort(value: unknown): ExpenseSort {
     "payer-asc",
     "payer-desc",
   ];
-  return allowed.includes(value as ExpenseSort) ? (value as ExpenseSort) : "created-desc";
+  return allowed.includes(value as ExpenseSort)
+    ? (value as ExpenseSort)
+    : "created-desc";
 }
 
-function normalizeState(value: Partial<ProjectState> | null | undefined): ProjectState {
+function normalizeState(
+  value: Partial<ProjectState> | null | undefined,
+): ProjectState {
   const v = value ?? {};
   return {
     projectName:
@@ -124,8 +136,7 @@ function compareText(first: string, second: string) {
   return first.localeCompare(second, "ru", { sensitivity: "base" });
 }
 
-// Format a cleaned numeric string with thousand spaces. Keeps the decimal
-// part intact: "70000" → "70 000", "70000.50" → "70 000.50".
+// Format a cleaned numeric string with thousand spaces.
 function formatThousands(raw: string): string {
   if (!raw) return "";
   const [int, dec] = raw.split(".");
@@ -133,18 +144,12 @@ function formatThousands(raw: string): string {
   return dec !== undefined ? `${intFmt}.${dec}` : intFmt;
 }
 
-// Strip user input down to a "machine-friendly" decimal string: digits,
-// at most one dot, no spaces. Used while typing so React state stays
-// parseable by Number(). Examples:
-//   "70 000"     → "70000"
-//   "70 000,50"  → "70000.50"
-//   "abc"        → ""
+// Strip user input down to a "machine-friendly" decimal string.
 function sanitizeAmountInput(value: string): string {
   const cleaned = value
     .replace(/\s/g, "")
     .replace(",", ".")
     .replace(/[^\d.]/g, "");
-  // Keep only the first dot.
   const firstDot = cleaned.indexOf(".");
   if (firstDot === -1) return cleaned;
   return (
@@ -180,13 +185,21 @@ export function ExpenseCalculator({
   const [expenseAmount, setExpenseAmount] = useState("");
   const [isAmountFocused, setIsAmountFocused] = useState(false);
   const [expensePayer, setExpensePayer] = useState("");
-  const [expenseCurrency, setExpenseCurrency] = useState<string>(primaryCurrency);
-  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
+  const [expenseCurrency, setExpenseCurrency] =
+    useState<string>(primaryCurrency);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>(
+    [],
+  );
   const [isAddingExpense, setIsAddingExpense] = useState(false);
-  // Owned projects render with server data immediately, guests need to
-  // hydrate from localStorage first.
+  const [lastAddedExpenseId, setLastAddedExpenseId] = useState<string | null>(
+    null,
+  );
   const [isReady, setIsReady] = useState(isOwnedProject);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
+
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { showToast, toast } = useToast();
 
   const peopleIds = useMemo(() => state.people.map((p) => p.id), [state.people]);
   const peopleIdsKey = peopleIds.join("|");
@@ -194,7 +207,6 @@ export function ExpenseCalculator({
   // Guest mode: load saved state from localStorage on mount.
   useEffect(() => {
     if (isOwnedProject) return;
-
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -204,14 +216,11 @@ export function ExpenseCalculator({
       console.warn("Unable to read saved project data", error);
     }
     setIsReady(true);
-
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, [isOwnedProject]);
 
-  // Keep selectedParticipantIds and expensePayer in sync with the
-  // current people list (drop removed people, default to "everyone").
   useEffect(() => {
     setSelectedParticipantIds((prev) => {
       const valid = prev.filter((id) => peopleIds.includes(id));
@@ -222,12 +231,9 @@ export function ExpenseCalculator({
     );
   }, [peopleIdsKey, peopleIds]);
 
-  // Persist current state — debounced server-action save for owned
-  // projects, synchronous localStorage for guests.
   const persistState = useCallback(
     (nextState: ProjectState) => {
       if (isReadOnly) return;
-
       if (isOwnedProject && projectId) {
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
@@ -259,7 +265,6 @@ export function ExpenseCalculator({
 
   const sortedExpenses = useMemo(() => {
     const indexed = state.expenses.map((expense, index) => ({ expense, index }));
-
     indexed.sort((a, b) => {
       if (state.expenseSort === "name-asc") {
         return compareText(a.expense.name, b.expense.name) || a.index - b.index;
@@ -269,19 +274,22 @@ export function ExpenseCalculator({
       }
       if (state.expenseSort === "payer-asc") {
         return (
-          compareText(getPersonName(a.expense.payerId), getPersonName(b.expense.payerId)) ||
-          a.index - b.index
+          compareText(
+            getPersonName(a.expense.payerId),
+            getPersonName(b.expense.payerId),
+          ) || a.index - b.index
         );
       }
       if (state.expenseSort === "payer-desc") {
         return (
-          compareText(getPersonName(b.expense.payerId), getPersonName(a.expense.payerId)) ||
-          a.index - b.index
+          compareText(
+            getPersonName(b.expense.payerId),
+            getPersonName(a.expense.payerId),
+          ) || a.index - b.index
         );
       }
       return a.index - b.index;
     });
-
     return indexed.map(({ expense }) => expense);
   }, [getPersonName, state.expenseSort, state.expenses]);
 
@@ -293,7 +301,6 @@ export function ExpenseCalculator({
     () => calculatePersonalCosts(state.people, state.expenses),
     [state.people, state.expenses],
   );
-  // total is in primary currency (toPrimary applied inside getTotalAmount).
   const totalAmountPrimary = useMemo(
     () => getTotalAmount(state.expenses),
     [state.expenses],
@@ -308,7 +315,7 @@ export function ExpenseCalculator({
       (p) => p.name.toLowerCase() === cleanName.toLowerCase(),
     );
     if (exists) {
-      alert("Такой участник уже есть");
+      showToast("Такой участник уже есть", "error");
       return;
     }
 
@@ -319,15 +326,17 @@ export function ExpenseCalculator({
     setPersonName("");
   }
 
-  function removePerson(personId: string) {
+  async function removePerson(personId: string) {
     const isUsed = state.expenses.some(
       (e) => e.payerId === personId || e.participantIds.includes(personId),
     );
     if (isUsed) {
-      alert("Участник уже есть в расходах. Сначала удалите связанные расходы.");
+      showToast(
+        "Участник в расходах. Сначала удалите связанные расходы.",
+        "error",
+      );
       return;
     }
-
     commitState({
       ...state,
       people: state.people.filter((p) => p.id !== personId),
@@ -341,24 +350,21 @@ export function ExpenseCalculator({
     const amount = Number(expenseAmount);
 
     if (!state.people.length) {
-      alert("Сначала добавьте участников.");
+      showToast("Сначала добавьте участников", "error");
       return;
     }
     if (!selectedParticipantIds.length) {
-      alert("Выберите хотя бы одного участника расхода.");
+      showToast("Выберите хотя бы одного участника", "error");
       return;
     }
     if (!expensePayer) {
-      alert("Выберите, кто оплатил расход.");
+      showToast("Выберите, кто оплатил", "error");
       return;
     }
 
     const cleanExpenseName = expenseName.trim();
     if (!cleanExpenseName || Number.isNaN(amount) || amount <= 0) return;
 
-    // For secondary-currency expenses fetch a fresh rate to stamp onto
-    // the record. This gives the user an instant ≈ X primary preview
-    // and the server preserves the rate on save.
     let exchangeRate = 1;
     if (expenseCurrency !== primaryCurrency) {
       setIsAddingExpense(true);
@@ -370,19 +376,20 @@ export function ExpenseCalculator({
           err instanceof Error && err.message
             ? err.message
             : "сервис курсов недоступен";
-        alert(`Не удалось получить курс валюты: ${reason}`);
+        showToast(`Курс не получен: ${reason}`, "error");
         setIsAddingExpense(false);
         return;
       }
       setIsAddingExpense(false);
     }
 
+    const newId = makeId();
     commitState({
       ...state,
       expenses: [
         ...state.expenses,
         {
-          id: makeId(),
+          id: newId,
           name: cleanExpenseName,
           amount,
           payerId: expensePayer,
@@ -393,12 +400,21 @@ export function ExpenseCalculator({
         },
       ],
     });
+    setLastAddedExpenseId(newId);
 
     setExpenseName("");
     setExpenseAmount("");
     setExpensePayer("");
     setSelectedParticipantIds(state.people.map((p) => p.id));
     setExpenseCurrency(primaryCurrency);
+
+    // Gentle scroll to the summary so the user sees the totals update.
+    setTimeout(() => {
+      summaryRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 50);
   }
 
   function removeExpense(expenseId: string) {
@@ -412,9 +428,16 @@ export function ExpenseCalculator({
     commitState({ ...state, expenseSort: getValidExpenseSort(value) });
   }
 
-  function resetProject() {
-    if (!confirm("Очистить весь расчет?")) return;
-
+  async function resetProject() {
+    const ok = await confirm({
+      title: "Очистить весь расчёт?",
+      description:
+        "Все участники и траты будут удалены. Это нельзя отменить.",
+      confirmLabel: "Очистить",
+      cancelLabel: "Отмена",
+      variant: "danger",
+    });
+    if (!ok) return;
     commitState({ ...DEFAULT_STATE });
     setPersonName("");
     setExpenseName("");
@@ -434,449 +457,559 @@ export function ExpenseCalculator({
 
   const primaryCurrencyInfo = getCurrency(primaryCurrency);
   const expenseCurrencyInfo = getCurrency(expenseCurrency);
+  const secondaryCurrencyInfo = secondaryCurrency
+    ? getCurrency(secondaryCurrency)
+    : null;
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="grid gap-1">
-          <p className="eyebrow">Калькулятор расходов</p>
+    <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
+      {/* === Header === */}
+      <header className="flex items-center justify-between gap-3 mb-6">
+        <div className="grid gap-1 min-w-0">
+          <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
+            Калькулятор расходов
+          </p>
           <Brand href={isOwnedProject ? "/app/projects" : "/"} />
         </div>
         {isOwnedProject && projectId ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <Link
               href="/account"
-              className="nav-button calc-nav-link"
+              className="inline-flex items-center justify-center h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors gap-1.5"
               aria-label="Личный кабинет"
             >
-              <UserCircle2 size={18} aria-hidden="true" />
-              <span className="hidden sm:inline">Личный кабинет</span>
+              <UserCircle2 size={16} aria-hidden="true" />
+              <span className="hidden sm:inline text-[0.88rem] font-semibold">
+                Личный кабинет
+              </span>
             </Link>
             <Link
               href={`/app/projects/${projectId}`}
-              className="nav-button calc-nav-link"
+              className="inline-flex items-center justify-center h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors gap-1.5"
               aria-label="Настройки проекта"
             >
-              <Settings size={18} aria-hidden="true" />
-              <span className="hidden sm:inline">Настройки</span>
+              <Settings size={16} aria-hidden="true" />
+              <span className="hidden sm:inline text-[0.88rem] font-semibold">
+                Настройки
+              </span>
             </Link>
           </div>
         ) : null}
       </header>
 
       {isReadOnly ? (
-        <p className="auth-banner auth-banner-success calc-readonly-banner">
+        <p
+          role="status"
+          className="rounded-control border border-[#F8D4C5] bg-accent-soft text-accent-dark text-[0.93rem] leading-snug px-3.5 py-2.5 mb-6"
+        >
           Режим просмотра — изменения не сохраняются. Попросите владельца
           сделать вас редактором.
         </p>
       ) : null}
 
-      <fieldset className="calc-fieldset" disabled={isReadOnly}>
-      <section className="project-panel" aria-labelledby="projectTitleLabel">
-        <label className="field-label" id="projectTitleLabel" htmlFor="projectName">
-          Название
-        </label>
-        <input
-          id="projectName"
-          className="text-input project-title"
-          type="text"
-          autoComplete="off"
-          value={state.projectName}
-          onChange={(event) =>
-            commitState({
-              ...state,
-              projectName: event.target.value.trim() || DEFAULT_STATE.projectName,
-            })
-          }
-          disabled={!isReady}
-        />
-        {isOwnedProject ? (
-          <p className="meta mt-2">
-            Итоги считаются в {primaryCurrency}
-            {primaryCurrencyInfo ? ` (${primaryCurrencyInfo.symbol})` : ""}
-            {hasSecondary && secondaryCurrency
-              ? ` · вторая валюта: ${secondaryCurrency}${
-                  getCurrency(secondaryCurrency)
-                    ? ` (${getCurrency(secondaryCurrency)!.symbol})`
-                    : ""
-                }`
-              : ""}
-          </p>
-        ) : null}
-      </section>
-
-      <section className="workspace">
-        <div className="section-header">
-          <div>
-            <h2>
-              <span className="section-icon" aria-hidden="true">
-                <Users size={20} />
-              </span>
-              Участники
-            </h2>
-            <p>
-              {state.people.length}{" "}
-              {plural(state.people.length, "человек", "человека", "человек")}
-            </p>
-          </div>
-        </div>
-        <form className="inline-form" onSubmit={addPerson}>
-          <input
-            className="text-input"
-            type="text"
-            placeholder="Имя"
-            autoComplete="off"
-            value={personName}
-            onChange={(event) => setPersonName(event.target.value)}
-            required
-          />
-          <button className="primary-button" type="submit">
-            <span className="button-icon" aria-hidden="true">+</span>
-            Добавить
-          </button>
-        </form>
-        <div className="chip-list" aria-live="polite">
-          {!state.people.length ? (
-            <div className="empty-state">
-              <strong>Пока никого</strong>
-              <span>Добавьте участников, чтобы завести первый расход.</span>
-            </div>
-          ) : (
-            state.people.map((person) => (
-              <div className="chip" key={person.id}>
-                <span>{person.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Удалить ${person.name}`}
-                  onClick={() => removePerson(person.id)}
-                >
-                  ×
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="workspace">
-        <div className="section-header">
-          <div>
-            <h2>
-              <span className="section-icon" aria-hidden="true">
-                <Receipt size={20} />
-              </span>
-              Расход
-            </h2>
-            <p>Кто оплатил и на кого делим</p>
-          </div>
-        </div>
-        <form className="expense-form" onSubmit={addExpense}>
-          <label className="field">
-            <span className="field-label">Название</span>
-            <input
-              className="text-input"
+      <fieldset className="border-0 p-0 m-0 min-w-0 disabled:opacity-70" disabled={isReadOnly}>
+        <div className="grid gap-3">
+          {/* === Project title === */}
+          <Card className="!p-5">
+            <label
+              htmlFor="projectName"
+              className="block text-[0.82rem] font-medium text-muted mb-1.5"
+            >
+              Название
+            </label>
+            <Input
+              id="projectName"
               type="text"
-              placeholder="Такси, продукты, подарок"
-              value={expenseName}
-              onChange={(event) => setExpenseName(event.target.value)}
-              required
+              autoComplete="off"
+              value={state.projectName}
+              onChange={(event) =>
+                commitState({
+                  ...state,
+                  projectName:
+                    event.target.value.trim() || DEFAULT_STATE.projectName,
+                })
+              }
+              disabled={!isReady}
+              className="!h-12 !text-[1.1rem] !font-semibold"
             />
-          </label>
-          <div className="two-columns">
-            <label className="field">
-              <span className="field-label">
-                Сумма
-                {expenseCurrencyInfo
-                  ? `, ${expenseCurrencyInfo.symbol}`
+            {isOwnedProject ? (
+              <p className="text-[0.82rem] text-muted mt-2">
+                Итоги в {primaryCurrency}
+                {primaryCurrencyInfo ? ` (${primaryCurrencyInfo.symbol})` : ""}
+                {hasSecondary && secondaryCurrency && secondaryCurrencyInfo
+                  ? ` · доп: ${secondaryCurrency} (${secondaryCurrencyInfo.symbol})`
                   : ""}
-              </span>
-              <input
-                className="text-input"
+              </p>
+            ) : null}
+          </Card>
+
+          {/* === Participants === */}
+          <Card className="!p-5">
+            <SectionHeader
+              icon={<Users size={16} aria-hidden="true" />}
+              title="Участники"
+              meta={`${state.people.length} ${plural(
+                state.people.length,
+                "человек",
+                "человека",
+                "человек",
+              )}`}
+            />
+            <form
+              className="grid grid-cols-[1fr_auto] gap-2 mt-1"
+              onSubmit={addPerson}
+            >
+              <Input
                 type="text"
-                inputMode="decimal"
+                placeholder="Имя"
                 autoComplete="off"
-                placeholder="0"
-                value={
-                  isAmountFocused
-                    ? expenseAmount
-                    : formatThousands(expenseAmount)
-                }
-                onChange={(event) =>
-                  setExpenseAmount(sanitizeAmountInput(event.target.value))
-                }
-                onFocus={() => setIsAmountFocused(true)}
-                onBlur={() => setIsAmountFocused(false)}
+                value={personName}
+                onChange={(event) => setPersonName(event.target.value)}
                 required
               />
-            </label>
-            <label className="field">
-              <span className="field-label">Кто платил</span>
-              <select
-                className="text-input"
-                value={expensePayer}
-                onChange={(event) => setExpensePayer(event.target.value)}
-                required
-              >
-                <option value="">
-                  {state.people.length ? "Выберите" : "Сначала добавьте людей"}
-                </option>
-                {state.people.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {hasSecondary && secondaryCurrency ? (
-            <div className="field">
-              <span className="field-label">Валюта</span>
-              <div
-                role="radiogroup"
-                aria-label="Валюта расхода"
-                className="inline-flex gap-1 rounded-control bg-[#F4F4F1] p-1 self-start"
-              >
-                <CurrencyToggle
-                  active={expenseCurrency === primaryCurrency}
-                  onClick={() => setExpenseCurrency(primaryCurrency)}
-                  label={`${primaryCurrency} ${primaryCurrencyInfo?.symbol ?? ""}`}
-                />
-                <CurrencyToggle
-                  active={expenseCurrency === secondaryCurrency}
-                  onClick={() => setExpenseCurrency(secondaryCurrency)}
-                  label={`${secondaryCurrency} ${
-                    getCurrency(secondaryCurrency)?.symbol ?? ""
-                  }`}
-                />
-              </div>
-            </div>
-          ) : null}
-          <fieldset className="participants-box">
-            <legend>Кто участвует</legend>
-            <div className="payer-actions">
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() =>
-                  setSelectedParticipantIds(state.people.map((p) => p.id))
-                }
-              >
-                Все
-              </button>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => setSelectedParticipantIds([])}
-              >
-                Никто
-              </button>
-            </div>
-            <div className="participant-grid">
+              <Button type="submit" variant="primary" size="md">
+                <Plus size={16} aria-hidden="true" />
+                <span>Добавить</span>
+              </Button>
+            </form>
+            <div
+              className="flex flex-wrap gap-2 mt-4 min-h-[36px]"
+              aria-live="polite"
+            >
               {!state.people.length ? (
-                <div className="empty-state">
-                  <strong>Нет участников</strong>
-                  <span>После добавления людей здесь появится выбор.</span>
-                </div>
+                <EmptyState
+                  title="Пока никого"
+                  hint="Добавьте участников, чтобы завести первую трату."
+                />
               ) : (
                 state.people.map((person) => (
-                  <label className="participant-option" key={person.id}>
-                    <input
-                      type="checkbox"
-                      value={person.id}
-                      checked={selectedParticipantIds.includes(person.id)}
-                      onChange={() => toggleParticipant(person.id)}
-                    />
-                    <span>{person.name}</span>
-                  </label>
+                  <span
+                    key={person.id}
+                    className="inline-flex items-center gap-1.5 h-8 pl-3 pr-1 rounded-full border border-line bg-paper text-[0.9rem] font-semibold text-ink"
+                  >
+                    <span className="max-w-[180px] truncate">{person.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removePerson(person.id)}
+                      aria-label={`Удалить ${person.name}`}
+                      className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-[#F4F4F1] text-muted hover:bg-[#FBEAE7] hover:text-danger transition-colors"
+                    >
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  </span>
                 ))
               )}
             </div>
-          </fieldset>
-          <button
-            className="primary-button full-width"
-            type="submit"
-            disabled={isAddingExpense}
-          >
-            {isAddingExpense ? (
-              <span>Сохраняем…</span>
-            ) : (
-              <>
-                <span className="button-icon" aria-hidden="true">+</span>
-                Добавить расход
-              </>
-            )}
-          </button>
-        </form>
-      </section>
+          </Card>
 
-      <section className="workspace">
-        <div className="section-header">
-          <div>
-            <h2>
-              <span className="section-icon" aria-hidden="true">
-                <ListChecks size={20} />
-              </span>
-              Расходы
-            </h2>
-            <p>
-              {state.expenses.length}{" "}
-              {plural(state.expenses.length, "запись", "записи", "записей")}
-            </p>
-          </div>
-          <button className="ghost-button danger" type="button" onClick={resetProject}>
-            Очистить
-          </button>
-        </div>
-        <div className="filter-bar" aria-label="Сортировка расходов">
-          <label className="field sort-field" htmlFor="expenseSort">
-            <span className="field-label">Сортировка</span>
-            <select
-              id="expenseSort"
-              className="text-input compact-select"
-              value={state.expenseSort}
-              onChange={(event) => changeSort(event.target.value)}
-            >
-              <option value="created-desc">По добавлению</option>
-              <option value="name-asc">Покупки А-Я</option>
-              <option value="name-desc">Покупки Я-А</option>
-              <option value="payer-asc">Платившие А-Я</option>
-              <option value="payer-desc">Платившие Я-А</option>
-            </select>
-          </label>
-        </div>
-        <div className="expense-list">
-          {!state.expenses.length ? (
-            <div className="empty-state">
-              <strong>Расходов пока нет</strong>
-              <span>Добавьте первую покупку или общий платеж.</span>
+          {/* === Expense form === */}
+          <Card className="!p-5">
+            <SectionHeader
+              icon={<Receipt size={16} aria-hidden="true" />}
+              title="Новая трата"
+              meta="Кто оплатил и на кого делим"
+            />
+            <form className="grid gap-3 mt-1" onSubmit={addExpense}>
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Название
+                </span>
+                <Input
+                  type="text"
+                  placeholder="Такси, продукты, подарок"
+                  value={expenseName}
+                  onChange={(event) => setExpenseName(event.target.value)}
+                  required
+                />
+              </label>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <label className="grid gap-1.5">
+                  <span className="text-[0.82rem] font-medium text-muted">
+                    Сумма
+                    {expenseCurrencyInfo
+                      ? `, ${expenseCurrencyInfo.symbol}`
+                      : ""}
+                  </span>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="0"
+                    value={
+                      isAmountFocused
+                        ? expenseAmount
+                        : formatThousands(expenseAmount)
+                    }
+                    onChange={(event) =>
+                      setExpenseAmount(sanitizeAmountInput(event.target.value))
+                    }
+                    onFocus={() => setIsAmountFocused(true)}
+                    onBlur={() => setIsAmountFocused(false)}
+                    required
+                  />
+                </label>
+                <label className="grid gap-1.5">
+                  <span className="text-[0.82rem] font-medium text-muted">
+                    Кто платил
+                  </span>
+                  <Select
+                    value={expensePayer}
+                    onChange={(event) => setExpensePayer(event.target.value)}
+                    required
+                  >
+                    <option value="">
+                      {state.people.length
+                        ? "Выберите"
+                        : "Сначала добавьте людей"}
+                    </option>
+                    {state.people.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              </div>
+              {hasSecondary && secondaryCurrency ? (
+                <div className="grid gap-1.5">
+                  <span className="text-[0.82rem] font-medium text-muted">
+                    Валюта
+                  </span>
+                  <div
+                    role="radiogroup"
+                    aria-label="Валюта расхода"
+                    className="inline-flex gap-1 rounded-control bg-[#F4F4F1] p-1 self-start"
+                  >
+                    <CurrencyToggle
+                      active={expenseCurrency === primaryCurrency}
+                      onClick={() => setExpenseCurrency(primaryCurrency)}
+                      label={`${primaryCurrency} ${primaryCurrencyInfo?.symbol ?? ""}`}
+                    />
+                    <CurrencyToggle
+                      active={expenseCurrency === secondaryCurrency}
+                      onClick={() => setExpenseCurrency(secondaryCurrency)}
+                      label={`${secondaryCurrency} ${secondaryCurrencyInfo?.symbol ?? ""}`}
+                    />
+                  </div>
+                </div>
+              ) : null}
+              <fieldset className="rounded-control border border-line p-3 min-w-0">
+                <legend className="px-1.5 text-[0.78rem] font-medium text-muted">
+                  Кто участвует
+                </legend>
+                <div className="flex gap-2 mb-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setSelectedParticipantIds(state.people.map((p) => p.id))
+                    }
+                  >
+                    Все
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSelectedParticipantIds([])}
+                  >
+                    Никто
+                  </Button>
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2">
+                  {!state.people.length ? (
+                    <EmptyState
+                      title="Нет участников"
+                      hint="После добавления людей здесь появится выбор."
+                    />
+                  ) : (
+                    state.people.map((person) => (
+                      <label
+                        key={person.id}
+                        className="grid grid-cols-[auto_1fr] items-center gap-2 min-h-10 sm:min-h-[36px] px-3 rounded-control border border-line bg-white text-[0.92rem] font-medium hover:border-[#D4D4D8] cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          value={person.id}
+                          checked={selectedParticipantIds.includes(person.id)}
+                          onChange={() => toggleParticipant(person.id)}
+                          className="h-4 w-4 accent-accent"
+                        />
+                        <span className="truncate">{person.name}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </fieldset>
+              <Button
+                type="submit"
+                variant="primary"
+                size="cta"
+                disabled={isAddingExpense}
+                className="w-full"
+              >
+                {isAddingExpense ? (
+                  <span>Сохраняем…</span>
+                ) : (
+                  <>
+                    <Plus size={16} aria-hidden="true" />
+                    <span>Добавить расход</span>
+                  </>
+                )}
+              </Button>
+            </form>
+          </Card>
+
+          {/* === Expense list === */}
+          <Card className="!p-5">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <SectionHeader
+                icon={<ListChecks size={16} aria-hidden="true" />}
+                title="Траты"
+                meta={`${state.expenses.length} ${plural(
+                  state.expenses.length,
+                  "запись",
+                  "записи",
+                  "записей",
+                )}`}
+                bare
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={resetProject}
+                aria-label="Очистить расчёт"
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                <span className="hidden sm:inline">Очистить</span>
+              </Button>
             </div>
-          ) : (
-            sortedExpenses.map((expense) => {
-              const code = expense.currency ?? primaryCurrency;
-              const isSecondary = code !== primaryCurrency;
-              return (
-                <article className="expense-item" key={expense.id}>
-                  <div className="expense-main">
-                    <strong>{expense.name}</strong>
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span className="money">
-                        {formatMoney(expense.amount, code, { compact: true })}
-                      </span>
-                      {isSecondary ? (
-                        <span className="text-[0.78rem] text-muted font-mono tabular-nums">
-                          ≈{" "}
-                          {formatMoney(toPrimary(expense), primaryCurrency, {
+            <label
+              htmlFor="expenseSort"
+              className="grid gap-1.5 max-w-[280px] mb-3"
+            >
+              <span className="text-[0.78rem] font-medium text-muted">
+                Сортировка
+              </span>
+              <Select
+                id="expenseSort"
+                value={state.expenseSort}
+                onChange={(event) => changeSort(event.target.value)}
+              >
+                <option value="created-desc">По добавлению</option>
+                <option value="name-asc">Покупки А-Я</option>
+                <option value="name-desc">Покупки Я-А</option>
+                <option value="payer-asc">Платившие А-Я</option>
+                <option value="payer-desc">Платившие Я-А</option>
+              </Select>
+            </label>
+            <div className="grid gap-2">
+              {!state.expenses.length ? (
+                <EmptyState
+                  title="Трат пока нет"
+                  hint="Добавьте первую покупку или общий платёж."
+                />
+              ) : (
+                sortedExpenses.map((expense) => {
+                  const code = expense.currency ?? primaryCurrency;
+                  const isSecondary = code !== primaryCurrency;
+                  const justAdded = expense.id === lastAddedExpenseId;
+                  return (
+                    <article
+                      key={expense.id}
+                      className={[
+                        "border border-line rounded-card bg-paper px-4 py-3 grid gap-1.5",
+                        justAdded ? "animate-[slideUp_220ms_ease-out]" : "",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <strong className="text-[0.98rem] font-semibold text-ink min-w-0 break-words">
+                          {expense.name}
+                        </strong>
+                        <div className="flex items-start gap-2 shrink-0">
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.95rem]">
+                              {formatMoney(expense.amount, code, {
+                                compact: true,
+                              })}
+                            </span>
+                            {isSecondary ? (
+                              <span className="text-[0.76rem] text-muted font-mono tabular-nums whitespace-nowrap">
+                                ≈{" "}
+                                {formatMoney(
+                                  toPrimary(expense),
+                                  primaryCurrency,
+                                  { compact: true },
+                                )}
+                              </span>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            aria-label={`Удалить ${expense.name}`}
+                            onClick={() => removeExpense(expense.id)}
+                            className="inline-flex items-center justify-center h-7 w-7 rounded-control bg-[#F4F4F1] text-muted hover:bg-[#FBEAE7] hover:text-danger transition-colors shrink-0"
+                          >
+                            <X size={14} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[0.85rem] text-muted leading-snug">
+                        Оплатил: {getPersonName(expense.payerId)}. Участвуют:{" "}
+                        {expense.participantIds.map(getPersonName).join(", ")}.
+                      </p>
+                    </article>
+                  );
+                })
+              )}
+            </div>
+          </Card>
+
+          {/* === Summary === */}
+          <div ref={summaryRef}>
+            <Card className="!p-5 !bg-gradient-to-b from-white to-accent-soft/40">
+              <SectionHeader
+                icon={<WalletCards size={16} aria-hidden="true" />}
+                title="Итог"
+                meta={`${formatMoney(totalAmountPrimary, primaryCurrency, {
+                  compact: true,
+                })} всего`}
+              />
+              <div className="grid gap-2 mt-1">
+                {!state.expenses.length ? (
+                  <EmptyState
+                    title="Нет расчёта"
+                    hint="Итог появится после добавления трат."
+                  />
+                ) : !transfers.length ? (
+                  <EmptyState
+                    title="Все ровно"
+                    hint="Никому не нужно переводить деньги."
+                  />
+                ) : (
+                  transfers.map((transfer) => (
+                    <article
+                      key={`${transfer.from}-${transfer.to}-${transfer.amount}`}
+                      className="border border-line rounded-card bg-white px-4 py-3"
+                    >
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <strong className="text-[0.95rem] font-semibold text-ink truncate">
+                            {getPersonName(transfer.from)}
+                          </strong>
+                          <ArrowRight
+                            size={14}
+                            aria-hidden="true"
+                            className="text-muted shrink-0"
+                          />
+                          <strong className="text-[0.95rem] font-semibold text-ink truncate">
+                            {getPersonName(transfer.to)}
+                          </strong>
+                        </div>
+                        <span className="font-mono tabular-nums font-bold text-accent whitespace-nowrap">
+                          {formatMoney(transfer.amount, primaryCurrency, {
                             compact: true,
                           })}
                         </span>
-                      ) : null}
-                    </div>
-                    <button
-                      className="expense-remove"
-                      type="button"
-                      aria-label={`Удалить ${expense.name}`}
-                      onClick={() => removeExpense(expense.id)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <p className="meta">
-                    Оплатил: {getPersonName(expense.payerId)}. Участвуют:{" "}
-                    {expense.participantIds.map(getPersonName).join(", ")}.
-                  </p>
-                </article>
-              );
-            })
-          )}
-        </div>
-      </section>
-
-      <section className="workspace summary-panel">
-        <div className="section-header">
-          <div>
-            <h2>
-              <span className="section-icon" aria-hidden="true">
-                <WalletCards size={20} />
-              </span>
-              Итог
-            </h2>
-            <p>
-              {formatMoney(totalAmountPrimary, primaryCurrency, { compact: true })} всего
-            </p>
-          </div>
-        </div>
-        <div className="summary-list">
-          {!state.expenses.length ? (
-            <div className="empty-state">
-              <strong>Нет расчета</strong>
-              <span>Итог появится после добавления расходов.</span>
-            </div>
-          ) : !transfers.length ? (
-            <div className="empty-state">
-              <strong>Все ровно</strong>
-              <span>Никому не нужно переводить деньги.</span>
-            </div>
-          ) : (
-            transfers.map((transfer) => (
-              <article
-                className="summary-item"
-                key={`${transfer.from}-${transfer.to}-${transfer.amount}`}
-              >
-                <div className="summary-main">
-                  <strong>
-                    {getPersonName(transfer.from)} → {getPersonName(transfer.to)}
-                  </strong>
-                  <span className="money">
-                    {formatMoney(transfer.amount, primaryCurrency, {
-                      compact: true,
-                    })}
-                  </span>
-                </div>
-              </article>
-            ))
-          )}
-        </div>
-        <details className="details-panel">
-          <summary>
-            <span className="details-arrow" aria-hidden="true" />
-            <span>Больше информации</span>
-          </summary>
-          <div className="details-content">
-            <p className="details-total">
-              <strong>Всего потрачено денег:</strong>{" "}
-              <span>
-                {formatMoney(totalAmountPrimary, primaryCurrency, {
-                  compact: true,
-                })}
-              </span>
-            </p>
-            <h3>Стоимость для каждого:</h3>
-            <div className="person-cost-list">
-              {!personalCosts.length ? (
-                <div className="empty-state">
-                  <strong>Нет участников</strong>
-                  <span>
-                    Добавьте людей и расходы, чтобы увидеть стоимость для каждого.
-                  </span>
-                </div>
-              ) : (
-                personalCosts.map((cost) => (
-                  <div className="person-cost-item" key={cost.personId}>
-                    <span>{getPersonName(cost.personId)}</span>
-                    <strong>
-                      {formatMoney(cost.amount, primaryCurrency, {
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+              <details className="group mt-4 pt-4 border-t border-line">
+                <summary className="inline-flex items-center gap-2 text-[0.92rem] font-semibold text-muted hover:text-ink cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                  <ChevronDown
+                    size={14}
+                    aria-hidden="true"
+                    className="transition-transform group-open:rotate-180"
+                  />
+                  <span>Больше информации</span>
+                </summary>
+                <div className="grid gap-4 pt-4">
+                  <p className="text-[0.95rem] text-muted">
+                    Всего потрачено:{" "}
+                    <strong className="text-ink font-mono tabular-nums font-semibold">
+                      {formatMoney(totalAmountPrimary, primaryCurrency, {
                         compact: true,
                       })}
                     </strong>
+                  </p>
+                  <h3 className="text-[1rem] font-bold text-ink">
+                    Стоимость для каждого
+                  </h3>
+                  <div className="grid gap-2">
+                    {!personalCosts.length ? (
+                      <EmptyState
+                        title="Нет участников"
+                        hint="Добавьте людей и траты."
+                      />
+                    ) : (
+                      personalCosts.map((cost) => (
+                        <div
+                          key={cost.personId}
+                          className="flex items-center justify-between gap-4 border border-line rounded-control bg-white px-3.5 py-2.5"
+                        >
+                          <span className="text-[0.93rem] text-ink truncate">
+                            {getPersonName(cost.personId)}
+                          </span>
+                          <strong className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap">
+                            {formatMoney(cost.amount, primaryCurrency, {
+                              compact: true,
+                            })}
+                          </strong>
+                        </div>
+                      ))
+                    )}
                   </div>
-                ))
-              )}
-            </div>
+                </div>
+              </details>
+            </Card>
           </div>
-        </details>
-      </section>
+        </div>
       </fieldset>
+
+      {confirmDialog}
+      {toast}
     </main>
+  );
+}
+
+function SectionHeader({
+  icon,
+  title,
+  meta,
+  bare = false,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  meta?: string;
+  bare?: boolean;
+}) {
+  return (
+    <div className={bare ? "" : "mb-4"}>
+      <div className="flex items-center gap-2">
+        <span className="inline-grid place-items-center h-7 w-7 rounded-control bg-[#F4F4F1] text-ink">
+          {icon}
+        </span>
+        <h2 className="text-[1.05rem] font-bold tracking-[-0.01em] text-ink">
+          {title}
+        </h2>
+      </div>
+      {meta ? (
+        <p className="text-[0.85rem] text-muted mt-1 ml-9">{meta}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function EmptyState({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="grid gap-1 border border-dashed border-line rounded-card bg-paper px-4 py-5 text-center">
+      <strong className="text-[0.95rem] font-semibold text-ink">{title}</strong>
+      <span className="text-[0.85rem] text-muted leading-snug">{hint}</span>
+    </div>
   );
 }
 

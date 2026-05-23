@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useConfirm } from "@/components/ui/modal";
 import { deleteProject } from "../actions";
 import {
   changeRole,
@@ -53,6 +54,8 @@ export function ProjectManagement({
   const iAmSoleOwner = isOwner && ownersCount === 1;
   const mustTransferBeforeLeaving = iAmSoleOwner && otherMembers.length > 0;
 
+  const { confirm, dialog: confirmDialog } = useConfirm();
+
   const [inviteState, inviteAction, invitePending] = useActionState(
     inviteMember,
     emptyMembersFormState,
@@ -86,10 +89,32 @@ export function ProjectManagement({
     }
   }
 
-  function confirmAndProceed(message: string) {
-    return (event: FormEvent<HTMLFormElement>) => {
-      if (!window.confirm(message)) {
-        event.preventDefault();
+  // Async confirm wrapper for form actions: preventDefault → show modal →
+  // if confirmed, programmatically resubmit the form (which fires the
+  // server action this time without recursing into the handler).
+  function confirmThenSubmit(opts: {
+    title: string;
+    description?: string;
+    confirmLabel?: string;
+    variant?: "default" | "danger";
+  }) {
+    return async (event: FormEvent<HTMLFormElement>) => {
+      const form = event.currentTarget;
+      if (form.dataset.confirmed === "true") {
+        // Second pass — let the form action run.
+        form.dataset.confirmed = "";
+        return;
+      }
+      event.preventDefault();
+      const ok = await confirm({
+        title: opts.title,
+        description: opts.description,
+        confirmLabel: opts.confirmLabel,
+        variant: opts.variant ?? "danger",
+      });
+      if (ok) {
+        form.dataset.confirmed = "true";
+        form.requestSubmit();
       }
     };
   }
@@ -160,9 +185,11 @@ export function ProjectManagement({
                   {canManageThis ? (
                     <form
                       action={removeMember}
-                      onSubmit={confirmAndProceed(
-                        `Удалить ${label} из проекта?`,
-                      )}
+                      onSubmit={confirmThenSubmit({
+                        title: `Убрать ${label}?`,
+                        description: "Участник потеряет доступ к проекту.",
+                        confirmLabel: "Убрать",
+                      })}
                     >
                       <input type="hidden" name="projectId" value={projectId} />
                       <input type="hidden" name="userId" value={m.user_id} />
@@ -273,9 +300,13 @@ export function ProjectManagement({
               <div className="flex flex-wrap gap-2">
                 <form
                   action={enableShare}
-                  onSubmit={confirmAndProceed(
-                    "Создать новую ссылку? Старая перестанет работать.",
-                  )}
+                  onSubmit={confirmThenSubmit({
+                    title: "Создать новую ссылку?",
+                    description:
+                      "Старая ссылка перестанет работать сразу после генерации новой.",
+                    confirmLabel: "Создать",
+                    variant: "default",
+                  })}
                 >
                   <input type="hidden" name="projectId" value={projectId} />
                   <Button type="submit" variant="secondary" size="sm">
@@ -284,7 +315,11 @@ export function ProjectManagement({
                 </form>
                 <form
                   action={disableShare}
-                  onSubmit={confirmAndProceed("Отключить публичный доступ?")}
+                  onSubmit={confirmThenSubmit({
+                    title: "Отключить публичный доступ?",
+                    description: "Имеющиеся ссылки на share-страницу перестанут работать.",
+                    confirmLabel: "Отключить",
+                  })}
                 >
                   <input type="hidden" name="projectId" value={projectId} />
                   <Button type="submit" variant="danger" size="sm">
@@ -325,8 +360,14 @@ export function ProjectManagement({
             <form
               action={transferOwnership}
               className="grid gap-3"
-              onSubmit={(event) => {
-                const select = event.currentTarget.elements.namedItem(
+              onSubmit={async (event) => {
+                const form = event.currentTarget;
+                if (form.dataset.confirmed === "true") {
+                  form.dataset.confirmed = "";
+                  return;
+                }
+                event.preventDefault();
+                const select = form.elements.namedItem(
                   "toUserId",
                 ) as HTMLSelectElement | null;
                 const selectedId = select?.value ?? "";
@@ -334,13 +375,16 @@ export function ProjectManagement({
                   (m) => m.user_id === selectedId,
                 );
                 const targetLabel = target ? memberLabel(target) : "участнику";
-                if (
-                  !window.confirm(
-                    `Передать права владения участнику «${targetLabel}»? ` +
-                      "Вы станете редактором.",
-                  )
-                ) {
-                  event.preventDefault();
+                const ok = await confirm({
+                  title: `Передать права «${targetLabel}»?`,
+                  description:
+                    "Вы станете редактором проекта. Управление участниками и публичной ссылкой перейдёт новому владельцу.",
+                  confirmLabel: "Передать",
+                  variant: "default",
+                });
+                if (ok) {
+                  form.dataset.confirmed = "true";
+                  form.requestSubmit();
                 }
               }}
             >
@@ -370,11 +414,17 @@ export function ProjectManagement({
         ) : (
           <form
             action={leaveProject}
-            onSubmit={confirmAndProceed(
-              members.length === 1
-                ? "Вы единственный участник — выход из проекта удалит его безвозвратно. Точно покинуть?"
-                : "Покинуть проект? Вы потеряете к нему доступ.",
-            )}
+            onSubmit={confirmThenSubmit({
+              title:
+                members.length === 1
+                  ? "Покинуть и удалить проект?"
+                  : "Покинуть проект?",
+              description:
+                members.length === 1
+                  ? "Вы единственный участник — проект будет удалён безвозвратно."
+                  : "Вы потеряете доступ. Вернуться можно будет только через нового владельца.",
+              confirmLabel: members.length === 1 ? "Покинуть и удалить" : "Покинуть",
+            })}
           >
             <input type="hidden" name="projectId" value={projectId} />
             <p className="text-[0.92rem] text-muted leading-snug mb-4">
@@ -397,9 +447,12 @@ export function ProjectManagement({
             </p>
             <form
               action={deleteProject}
-              onSubmit={confirmAndProceed(
-                "Удалить проект безвозвратно? Это нельзя отменить.",
-              )}
+              onSubmit={confirmThenSubmit({
+                title: "Удалить проект?",
+                description:
+                  "Все участники потеряют доступ, история стирается безвозвратно.",
+                confirmLabel: "Удалить",
+              })}
             >
               <input type="hidden" name="id" value={projectId} />
               <Button type="submit" variant="danger" size="md">
@@ -409,6 +462,8 @@ export function ProjectManagement({
           </>
         ) : null}
       </Card>
+
+      {confirmDialog}
     </>
   );
 }
