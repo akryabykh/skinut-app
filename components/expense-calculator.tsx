@@ -83,9 +83,13 @@ type ExpenseCalculatorProps = {
   /** Share token if the owner/editor enabled the public link. Powers the
    *  "Поделиться" button in the calculator header. */
   shareToken?: string | null;
-  /** Live secondary→primary rate captured on page load. Rendered next
-   *  to the currency toggle as «1 ₺ ≈ 2,45 ₽». null = upstream was
-   *  unreachable, hide the chip silently. */
+  /** Secondary→primary rate captured on page load (either the live rate
+   *  from open.er-api or the project's manual override). Rendered next
+   *  to the currency toggle as «1 ₽ ≈ 0,40 ₺» (inverted for human
+   *  readability — 1 unit of the primary currency in terms of the
+   *  secondary). Also used when stamping new expenses, so the rate
+   *  displayed in-form matches what gets saved. null = no override and
+   *  upstream unreachable, hide the chip silently. */
   currentRate?: number | null;
   /** User profile fields for the shared AppHeader. Only populated for
    *  authenticated project loads (not guest mode). */
@@ -549,20 +553,36 @@ export function ExpenseCalculator({
       (!isEditing || currencyChanged || !existing?.exchange_rate_used);
 
     if (needsFetch) {
-      setIsAddingExpense(true);
-      try {
-        exchangeRate = await fetchCurrentRate(expenseCurrency, primaryCurrency);
-      } catch (err) {
-        console.warn("Не удалось получить курс валюты", err);
-        const reason =
-          err instanceof Error && err.message
-            ? err.message
-            : "сервис курсов недоступен";
-        showToast(`Курс не получен: ${reason}`, "error");
+      // Skip the network round-trip when the page already loaded a rate
+      // for this direction — currentRate already reflects the project's
+      // manual override (if any), so it matches what saveProjectPayload
+      // would stamp anyway. Saves ~150ms on every "Добавить".
+      if (
+        currentRate &&
+        currentRate > 0 &&
+        expenseCurrency === secondaryCurrency
+      ) {
+        exchangeRate = currentRate;
+      } else {
+        setIsAddingExpense(true);
+        try {
+          exchangeRate = await fetchCurrentRate(
+            expenseCurrency,
+            primaryCurrency,
+            projectId,
+          );
+        } catch (err) {
+          console.warn("Не удалось получить курс валюты", err);
+          const reason =
+            err instanceof Error && err.message
+              ? err.message
+              : "сервис курсов недоступен";
+          showToast(`Курс не получен: ${reason}`, "error");
+          setIsAddingExpense(false);
+          return;
+        }
         setIsAddingExpense(false);
-        return;
       }
-      setIsAddingExpense(false);
     } else if (isEditing && existing) {
       exchangeRate = existing.exchange_rate_used ?? 1;
     }
@@ -933,10 +953,14 @@ export function ExpenseCalculator({
                         label={`${secondaryCurrency} ${secondaryCurrencyInfo?.symbol ?? ""}`}
                       />
                     </div>
-                    {currentRate && currentRate > 0 && secondaryCurrencyInfo ? (
+                    {currentRate &&
+                    currentRate > 0 &&
+                    secondaryCurrency &&
+                    secondaryCurrencyInfo &&
+                    primaryCurrencyInfo ? (
                       <span className="text-[0.78rem] text-muted font-mono tabular-nums whitespace-nowrap">
-                        1 {secondaryCurrencyInfo.symbol} ≈{" "}
-                        {formatMoney(currentRate, primaryCurrency, {
+                        1 {primaryCurrencyInfo.symbol} ≈{" "}
+                        {formatMoney(1 / currentRate, secondaryCurrency, {
                           compact: true,
                         })}
                       </span>
