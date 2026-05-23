@@ -1,13 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { landingPathAfterAuth } from "../actions";
 
 // Handler for Supabase email-confirmation links and OAuth callbacks.
 // Supabase appends ?code=... to the redirect URL; we exchange it for a
-// session and forward the user to /app/projects (returning users with
-// projects) or /account (brand-new users) — see landingPathAfterAuth().
+// session and forward the user on.
 //
-// An explicit ?next=... wins over the smart landing.
+// Defaults to /app/projects (the empty-state already handles brand-new
+// users with no projects — they see «У вас пока нет проектов» + the
+// "Новый проект" CTA, which is a better landing for OAuth signups than
+// pushing them to /account just to look at their email).
+//
+// An explicit ?next=... wins over the default.
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
@@ -25,7 +28,6 @@ export async function GET(request: NextRequest) {
   }
 
   // Only allow internal redirects to avoid open-redirect attacks.
-  const target =
-    next && next.startsWith("/") ? next : await landingPathAfterAuth();
+  const target = next && next.startsWith("/") ? next : "/app/projects";
   return NextResponse.redirect(`${origin}${target}`);
 }
