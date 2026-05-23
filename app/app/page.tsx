@@ -39,7 +39,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   const { data: project } = await supabase
     .from("app_projects")
     .select(
-      "id, name, payload, primary_currency, secondary_currency, share_token",
+      "id, name, payload, primary_currency, secondary_currency, manual_rate, share_token",
     )
     .eq("id", projectId)
     .maybeSingle();
@@ -120,24 +120,44 @@ export default async function AppPage({ searchParams }: AppPageProps) {
     }
   }
 
-  // Block 12 polish: live secondary→primary rate for the header chip
-  // («1 ₺ ≈ 2,45 ₽»). Best-effort — getExchangeRate is cached for 12h
-  // in Supabase and the page still renders fine if the upstream is
-  // unreachable: we just hide the chip.
+  // Правило: курс зафиксирован на проекте при создании (поле manual_rate,
+  // см. миграцию 20260523000002_manual_rate.sql). Калькулятор просто
+  // читает зафиксированное значение — никакого live-fetch здесь нет,
+  // чтобы расхождение между «вижу в шапке» и «застамплено на трате»
+  // было невозможно.
+  //
+  // Для legacy-проектов (созданных до фиксации правила) делаем разовый
+  // backfill: если есть secondary, но manual_rate is null — фетчим и
+  // обновляем проект, чтобы дальше работала единая логика. Best-effort:
+  // если апстрим недоступен, currentRate остаётся null, хинт скрыт,
+  // owner увидит на следующем открытии или подставит курс вручную.
   let currentRate: number | null = null;
   const primaryCode = project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY;
   if (project.secondary_currency && project.secondary_currency !== primaryCode) {
-    try {
-      const result = await getExchangeRate(
-        project.secondary_currency,
-        primaryCode,
-      );
-      currentRate = result.rate;
-    } catch (err) {
-      console.warn(
-        `[app/page] failed to fetch header rate ${project.secondary_currency}→${primaryCode}`,
-        err,
-      );
+    if (
+      typeof project.manual_rate === "number" &&
+      project.manual_rate > 0
+    ) {
+      currentRate = project.manual_rate;
+    } else if (canEdit) {
+      try {
+        const result = await getExchangeRate(
+          project.secondary_currency,
+          primaryCode,
+        );
+        currentRate = result.rate;
+        // Lazy backfill — фиксируем курс на проекте, чтобы это был
+        // последний раз, когда мы дёрнули live API для этого проекта.
+        await supabase
+          .from("app_projects")
+          .update({ manual_rate: currentRate })
+          .eq("id", project.id);
+      } catch (err) {
+        console.warn(
+          `[app/page] backfill manual_rate ${project.secondary_currency}→${primaryCode} failed`,
+          err,
+        );
+      }
     }
   }
 
