@@ -46,6 +46,12 @@ import {
   formatMoney,
   getCurrency,
 } from "@/lib/currencies";
+import {
+  CATEGORIES,
+  DEFAULT_CATEGORY,
+  getCategory,
+  isCategoryId,
+} from "@/lib/categories";
 
 type ExpenseSort =
   | "created-desc"
@@ -187,6 +193,9 @@ export function ExpenseCalculator({
   const [expensePayer, setExpensePayer] = useState("");
   const [expenseCurrency, setExpenseCurrency] =
     useState<string>(primaryCurrency);
+  const [expenseCategory, setExpenseCategory] =
+    useState<string>(DEFAULT_CATEGORY);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>(
     [],
   );
@@ -306,6 +315,42 @@ export function ExpenseCalculator({
     [state.expenses],
   );
 
+  // Aggregate spend per category, in primary currency.
+  const categoryTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const expense of state.expenses) {
+      const cat =
+        expense.category && isCategoryId(expense.category)
+          ? expense.category
+          : DEFAULT_CATEGORY;
+      totals.set(cat, (totals.get(cat) ?? 0) + toPrimary(expense));
+    }
+    return CATEGORIES.map((c) => ({
+      category: c,
+      amount: Math.round((totals.get(c.id) ?? 0) * 100) / 100,
+    })).filter((row) => row.amount > 0);
+  }, [state.expenses]);
+
+  const usedCategories = useMemo(() => {
+    const used = new Set<string>();
+    for (const e of state.expenses) {
+      const cat =
+        e.category && isCategoryId(e.category) ? e.category : DEFAULT_CATEGORY;
+      used.add(cat);
+    }
+    return used;
+  }, [state.expenses]);
+
+  // Category filter — affects the expense list view only, not totals.
+  const visibleExpenses = useMemo(() => {
+    if (categoryFilter === "all") return sortedExpenses;
+    return sortedExpenses.filter((e) => {
+      const cat =
+        e.category && isCategoryId(e.category) ? e.category : DEFAULT_CATEGORY;
+      return cat === categoryFilter;
+    });
+  }, [sortedExpenses, categoryFilter]);
+
   function addPerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const cleanName = personName.trim();
@@ -397,6 +442,9 @@ export function ExpenseCalculator({
           createdAt: new Date().toISOString(),
           currency: expenseCurrency,
           exchange_rate_used: exchangeRate,
+          category: isCategoryId(expenseCategory)
+            ? expenseCategory
+            : DEFAULT_CATEGORY,
         },
       ],
     });
@@ -407,6 +455,7 @@ export function ExpenseCalculator({
     setExpensePayer("");
     setSelectedParticipantIds(state.people.map((p) => p.id));
     setExpenseCurrency(primaryCurrency);
+    setExpenseCategory(DEFAULT_CATEGORY);
 
     // Gentle scroll to the summary so the user sees the totals update.
     setTimeout(() => {
@@ -445,6 +494,8 @@ export function ExpenseCalculator({
     setExpensePayer("");
     setSelectedParticipantIds([]);
     setExpenseCurrency(primaryCurrency);
+    setExpenseCategory(DEFAULT_CATEGORY);
+    setCategoryFilter("all");
   }
 
   function toggleParticipant(personId: string) {
@@ -693,6 +744,22 @@ export function ExpenseCalculator({
                   </div>
                 </div>
               ) : null}
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Категория
+                </span>
+                <Select
+                  value={expenseCategory}
+                  onChange={(event) => setExpenseCategory(event.target.value)}
+                  required
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.emoji} {c.name_ru}
+                    </option>
+                  ))}
+                </Select>
+              </label>
               <fieldset className="rounded-control border border-line p-3 min-w-0">
                 <legend className="px-1.5 text-[0.78rem] font-medium text-muted">
                   Кто участвует
@@ -805,17 +872,40 @@ export function ExpenseCalculator({
                 <option value="payer-desc">Платившие Я-А</option>
               </Select>
             </label>
+            {usedCategories.size > 1 ? (
+              <div className="flex flex-wrap gap-1.5 mb-3" role="group" aria-label="Фильтр по категории">
+                <CategoryFilterChip
+                  active={categoryFilter === "all"}
+                  onClick={() => setCategoryFilter("all")}
+                  label="Все"
+                />
+                {CATEGORIES.filter((c) => usedCategories.has(c.id)).map((c) => (
+                  <CategoryFilterChip
+                    key={c.id}
+                    active={categoryFilter === c.id}
+                    onClick={() => setCategoryFilter(c.id)}
+                    label={`${c.emoji} ${c.name_ru}`}
+                  />
+                ))}
+              </div>
+            ) : null}
             <div className="grid gap-2">
               {!state.expenses.length ? (
                 <EmptyState
                   title="Трат пока нет"
                   hint="Добавьте первую покупку или общий платёж."
                 />
+              ) : visibleExpenses.length === 0 ? (
+                <EmptyState
+                  title="Нет трат в этой категории"
+                  hint="Снимите фильтр или добавьте новую трату."
+                />
               ) : (
-                sortedExpenses.map((expense) => {
+                visibleExpenses.map((expense) => {
                   const code = expense.currency ?? primaryCurrency;
                   const isSecondary = code !== primaryCurrency;
                   const justAdded = expense.id === lastAddedExpenseId;
+                  const cat = getCategory(expense.category);
                   return (
                     <article
                       key={expense.id}
@@ -825,9 +915,21 @@ export function ExpenseCalculator({
                       ].join(" ")}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <strong className="text-[0.98rem] font-semibold text-ink min-w-0 break-words">
-                          {expense.name}
-                        </strong>
+                        <div className="min-w-0 flex flex-col items-start gap-1.5">
+                          <strong className="text-[0.98rem] font-semibold text-ink min-w-0 break-words">
+                            {expense.name}
+                          </strong>
+                          <span
+                            className="inline-flex items-center gap-1 h-5 px-2 rounded-full text-[0.72rem] font-semibold"
+                            style={{
+                              backgroundColor: cat.bg,
+                              color: cat.fg,
+                            }}
+                          >
+                            <span aria-hidden="true">{cat.emoji}</span>
+                            <span>{cat.name_ru}</span>
+                          </span>
+                        </div>
                         <div className="flex items-start gap-2 shrink-0">
                           <div className="flex flex-col items-end gap-0.5">
                             <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.95rem]">
@@ -918,6 +1020,37 @@ export function ExpenseCalculator({
                   ))
                 )}
               </div>
+              {categoryTotals.length > 0 ? (
+                <div className="mt-4 pt-4 border-t border-line">
+                  <h3 className="text-[0.78rem] font-semibold uppercase tracking-[0.1em] text-muted mb-3">
+                    По категориям
+                  </h3>
+                  <div className="grid gap-1.5">
+                    {categoryTotals.map(({ category, amount }) => (
+                      <div
+                        key={category.id}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <span
+                          className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[0.78rem] font-semibold"
+                          style={{
+                            backgroundColor: category.bg,
+                            color: category.fg,
+                          }}
+                        >
+                          <span aria-hidden="true">{category.emoji}</span>
+                          <span>{category.name_ru}</span>
+                        </span>
+                        <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.92rem]">
+                          {formatMoney(amount, primaryCurrency, {
+                            compact: true,
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <details className="group mt-4 pt-4 border-t border-line">
                 <summary className="inline-flex items-center gap-2 text-[0.92rem] font-semibold text-muted hover:text-ink cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                   <ChevronDown
@@ -1032,6 +1165,32 @@ function CurrencyToggle({
         active
           ? "bg-white text-ink shadow-xs"
           : "bg-transparent text-muted hover:text-ink",
+      ].join(" ")}
+    >
+      {label}
+    </button>
+  );
+}
+
+function CategoryFilterChip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={[
+        "inline-flex items-center h-7 px-3 rounded-full text-[0.78rem] font-semibold transition-colors border",
+        active
+          ? "bg-ink text-white border-ink"
+          : "bg-white text-muted border-line hover:border-[#D4D4D8] hover:text-ink",
       ].join(" ")}
     >
       {label}

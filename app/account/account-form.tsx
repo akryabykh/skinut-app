@@ -79,7 +79,7 @@ export function AccountForm({ initialDisplayName, email }: AccountFormProps) {
         className="!p-5 mt-6 !border-danger/20 !bg-[#FBEAE7]/30"
       >
         <h2 className="text-[1rem] font-bold tracking-[-0.01em] text-danger mb-1">
-          Опасная зона
+          Внимание
         </h2>
         <p className="text-[0.9rem] text-muted leading-snug mb-4">
           Удаление аккаунта необратимо. Все ваши проекты — участники, расходы и
