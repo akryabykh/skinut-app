@@ -60,6 +60,20 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   const canEdit =
     membership?.role === "owner" || membership?.role === "editor";
 
+  // Profile data for the AppHeader user-menu (avatar + dropdown).
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name, email, avatar_url")
+    .eq("id", user.id)
+    .maybeSingle();
+  const myEmail = user.email ?? profile?.email ?? "—";
+  const myFallbackName =
+    user.email && user.email.includes("@")
+      ? user.email.split("@")[0]
+      : "Пользователь";
+  const myDisplayName = profile?.display_name ?? myFallbackName;
+  const myAvatarUrl = profile?.avatar_url ?? null;
+
   // === Block 12 (1): sync project_members → payload.people ===
   //
   // Whenever a logged-in user opens the calculator, we make sure that
@@ -114,6 +128,9 @@ export default async function AppPage({ searchParams }: AppPageProps) {
       primaryCurrency={project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY}
       secondaryCurrency={project.secondary_currency}
       shareToken={project.share_token}
+      userDisplayName={myDisplayName}
+      userAvatarUrl={myAvatarUrl}
+      userEmail={myEmail}
     />
   );
 }
