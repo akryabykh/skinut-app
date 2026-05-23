@@ -13,6 +13,7 @@ import {
   ArrowRight,
   ChevronDown,
   ListChecks,
+  Pencil,
   Plus,
   Receipt,
   Settings,
@@ -29,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
+import { CategoryDonut } from "@/components/ui/category-donut";
 import {
   fetchCurrentRate,
   saveProjectPayload,
@@ -203,6 +205,11 @@ export function ExpenseCalculator({
   const [lastAddedExpenseId, setLastAddedExpenseId] = useState<string | null>(
     null,
   );
+  // Block 10: editing existing expense in-place via the same form.
+  // When non-null, the "Новая трата" form switches to edit mode and the
+  // submit button updates the existing record instead of appending a new one.
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(isOwnedProject);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
@@ -351,6 +358,26 @@ export function ExpenseCalculator({
     });
   }, [sortedExpenses, categoryFilter]);
 
+  // Sum of what each person actually paid out of pocket, in primary currency.
+  // Different from personalCosts (which is the share they should bear).
+  const paidByPerson = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of state.expenses) {
+      map.set(e.payerId, (map.get(e.payerId) ?? 0) + toPrimary(e));
+    }
+    return state.people
+      .map((p) => ({
+        personId: p.id,
+        amount: Math.round((map.get(p.id) ?? 0) * 100) / 100,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [state.expenses, state.people]);
+
+  const maxPaid = useMemo(
+    () => paidByPerson.reduce((max, x) => Math.max(max, x.amount), 0),
+    [paidByPerson],
+  );
+
   function addPerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const cleanName = personName.trim();
@@ -388,6 +415,42 @@ export function ExpenseCalculator({
     });
   }
 
+  function resetExpenseForm() {
+    setExpenseName("");
+    setExpenseAmount("");
+    setExpensePayer("");
+    setSelectedParticipantIds(state.people.map((p) => p.id));
+    setExpenseCurrency(primaryCurrency);
+    setExpenseCategory(DEFAULT_CATEGORY);
+  }
+
+  function startEditingExpense(expense: Expense) {
+    setEditingExpenseId(expense.id);
+    setExpenseName(expense.name);
+    setExpenseAmount(String(expense.amount));
+    setExpensePayer(expense.payerId);
+    setSelectedParticipantIds(expense.participantIds);
+    setExpenseCurrency(expense.currency ?? primaryCurrency);
+    setExpenseCategory(
+      expense.category && isCategoryId(expense.category)
+        ? expense.category
+        : DEFAULT_CATEGORY,
+    );
+    setLastAddedExpenseId(null);
+    // Scroll the form into view so the user sees what they're editing.
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 50);
+  }
+
+  function cancelEditingExpense() {
+    setEditingExpenseId(null);
+    resetExpenseForm();
+  }
+
   async function addExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isAddingExpense) return;
@@ -410,8 +473,23 @@ export function ExpenseCalculator({
     const cleanExpenseName = expenseName.trim();
     if (!cleanExpenseName || Number.isNaN(amount) || amount <= 0) return;
 
+    const isEditing = editingExpenseId !== null;
+    const existing = isEditing
+      ? state.expenses.find((e) => e.id === editingExpenseId)
+      : null;
+
+    // Determine the rate:
+    //   - same currency as existing → preserve the previously stamped rate
+    //     (history is frozen at first save, per the Block 4 contract)
+    //   - currency changed or new expense → fetch fresh
     let exchangeRate = 1;
-    if (expenseCurrency !== primaryCurrency) {
+    const currencyChanged =
+      isEditing && existing && existing.currency !== expenseCurrency;
+    const needsFetch =
+      expenseCurrency !== primaryCurrency &&
+      (!isEditing || currencyChanged || !existing?.exchange_rate_used);
+
+    if (needsFetch) {
       setIsAddingExpense(true);
       try {
         exchangeRate = await fetchCurrentRate(expenseCurrency, primaryCurrency);
@@ -426,44 +504,66 @@ export function ExpenseCalculator({
         return;
       }
       setIsAddingExpense(false);
+    } else if (isEditing && existing) {
+      exchangeRate = existing.exchange_rate_used ?? 1;
     }
 
-    const newId = makeId();
-    commitState({
-      ...state,
-      expenses: [
-        ...state.expenses,
-        {
-          id: newId,
-          name: cleanExpenseName,
-          amount,
-          payerId: expensePayer,
-          participantIds: selectedParticipantIds,
-          createdAt: new Date().toISOString(),
-          currency: expenseCurrency,
-          exchange_rate_used: exchangeRate,
-          category: isCategoryId(expenseCategory)
-            ? expenseCategory
-            : DEFAULT_CATEGORY,
-        },
-      ],
-    });
-    setLastAddedExpenseId(newId);
+    const category = isCategoryId(expenseCategory)
+      ? expenseCategory
+      : DEFAULT_CATEGORY;
 
-    setExpenseName("");
-    setExpenseAmount("");
-    setExpensePayer("");
-    setSelectedParticipantIds(state.people.map((p) => p.id));
-    setExpenseCurrency(primaryCurrency);
-    setExpenseCategory(DEFAULT_CATEGORY);
-
-    // Gentle scroll to the summary so the user sees the totals update.
-    setTimeout(() => {
-      summaryRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
+    if (isEditing && existing) {
+      // Update in place.
+      commitState({
+        ...state,
+        expenses: state.expenses.map((e) =>
+          e.id === editingExpenseId
+            ? {
+                ...e,
+                name: cleanExpenseName,
+                amount,
+                payerId: expensePayer,
+                participantIds: selectedParticipantIds,
+                currency: expenseCurrency,
+                exchange_rate_used: exchangeRate,
+                category,
+              }
+            : e,
+        ),
       });
-    }, 50);
+      setEditingExpenseId(null);
+      resetExpenseForm();
+      showToast("Трата обновлена");
+    } else {
+      // Append new.
+      const newId = makeId();
+      commitState({
+        ...state,
+        expenses: [
+          ...state.expenses,
+          {
+            id: newId,
+            name: cleanExpenseName,
+            amount,
+            payerId: expensePayer,
+            participantIds: selectedParticipantIds,
+            createdAt: new Date().toISOString(),
+            currency: expenseCurrency,
+            exchange_rate_used: exchangeRate,
+            category,
+          },
+        ],
+      });
+      setLastAddedExpenseId(newId);
+      resetExpenseForm();
+
+      setTimeout(() => {
+        summaryRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }, 50);
+    }
   }
 
   function removeExpense(expenseId: string) {
@@ -471,6 +571,11 @@ export function ExpenseCalculator({
       ...state,
       expenses: state.expenses.filter((e) => e.id !== expenseId),
     });
+    // If we were editing the one being removed, clear editing state.
+    if (editingExpenseId === expenseId) {
+      setEditingExpenseId(null);
+      resetExpenseForm();
+    }
   }
 
   function changeSort(value: string) {
@@ -654,11 +759,16 @@ export function ExpenseCalculator({
           </Card>
 
           {/* === Expense form === */}
+          <div ref={formRef}>
           <Card className="!p-5">
             <SectionHeader
               icon={<Receipt size={16} aria-hidden="true" />}
-              title="Новая трата"
-              meta="Кто оплатил и на кого делим"
+              title={editingExpenseId ? "Редактировать трату" : "Новая трата"}
+              meta={
+                editingExpenseId
+                  ? "Поменяйте поля и сохраните"
+                  : "Кто оплатил и на кого делим"
+              }
             />
             <form className="grid gap-3 mt-1" onSubmit={addExpense}>
               <label className="grid gap-1.5">
@@ -809,24 +919,39 @@ export function ExpenseCalculator({
                   )}
                 </div>
               </fieldset>
-              <Button
-                type="submit"
-                variant="primary"
-                size="cta"
-                disabled={isAddingExpense}
-                className="w-full"
-              >
-                {isAddingExpense ? (
-                  <span>Сохраняем…</span>
-                ) : (
-                  <>
-                    <Plus size={16} aria-hidden="true" />
-                    <span>Добавить расход</span>
-                  </>
-                )}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="cta"
+                  disabled={isAddingExpense}
+                  className="flex-1"
+                >
+                  {isAddingExpense ? (
+                    <span>Сохраняем…</span>
+                  ) : editingExpenseId ? (
+                    <span>Сохранить</span>
+                  ) : (
+                    <>
+                      <Plus size={16} aria-hidden="true" />
+                      <span>Добавить расход</span>
+                    </>
+                  )}
+                </Button>
+                {editingExpenseId ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="cta"
+                    onClick={cancelEditingExpense}
+                  >
+                    Отмена
+                  </Button>
+                ) : null}
+              </div>
             </form>
           </Card>
+          </div>
 
           {/* === Expense list === */}
           <Card className="!p-5">
@@ -948,14 +1073,24 @@ export function ExpenseCalculator({
                               </span>
                             ) : null}
                           </div>
-                          <button
-                            type="button"
-                            aria-label={`Удалить ${expense.name}`}
-                            onClick={() => removeExpense(expense.id)}
-                            className="inline-flex items-center justify-center h-7 w-7 rounded-control bg-[#F4F4F1] text-muted hover:bg-[#FBEAE7] hover:text-danger transition-colors shrink-0"
-                          >
-                            <X size={14} aria-hidden="true" />
-                          </button>
+                          <div className="flex flex-col gap-1 shrink-0">
+                            <button
+                              type="button"
+                              aria-label={`Редактировать ${expense.name}`}
+                              onClick={() => startEditingExpense(expense)}
+                              className="inline-flex items-center justify-center h-7 w-7 rounded-control bg-[#F4F4F1] text-muted hover:bg-accent-soft hover:text-accent-dark transition-colors"
+                            >
+                              <Pencil size={13} aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Удалить ${expense.name}`}
+                              onClick={() => removeExpense(expense.id)}
+                              className="inline-flex items-center justify-center h-7 w-7 rounded-control bg-[#F4F4F1] text-muted hover:bg-[#FBEAE7] hover:text-danger transition-colors"
+                            >
+                              <X size={14} aria-hidden="true" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <p className="text-[0.85rem] text-muted leading-snug">
@@ -1025,29 +1160,37 @@ export function ExpenseCalculator({
                   <h3 className="text-[0.78rem] font-semibold uppercase tracking-[0.1em] text-muted mb-3">
                     По категориям
                   </h3>
-                  <div className="grid gap-1.5">
-                    {categoryTotals.map(({ category, amount }) => (
-                      <div
-                        key={category.id}
-                        className="flex items-center justify-between gap-3"
-                      >
-                        <span
-                          className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[0.78rem] font-semibold"
-                          style={{
-                            backgroundColor: category.bg,
-                            color: category.fg,
-                          }}
+                  <div className="grid sm:grid-cols-[auto_1fr] items-center gap-4 sm:gap-6">
+                    <CategoryDonut
+                      slices={categoryTotals}
+                      totalAmount={totalAmountPrimary}
+                      currency={primaryCurrency}
+                      size={140}
+                    />
+                    <div className="grid gap-1.5">
+                      {categoryTotals.map(({ category, amount }) => (
+                        <div
+                          key={category.id}
+                          className="flex items-center justify-between gap-3"
                         >
-                          <span aria-hidden="true">{category.emoji}</span>
-                          <span>{category.name_ru}</span>
-                        </span>
-                        <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.92rem]">
-                          {formatMoney(amount, primaryCurrency, {
-                            compact: true,
-                          })}
-                        </span>
-                      </div>
-                    ))}
+                          <span
+                            className="inline-flex items-center gap-1.5 h-6 px-2 rounded-full text-[0.78rem] font-semibold"
+                            style={{
+                              backgroundColor: category.bg,
+                              color: category.fg,
+                            }}
+                          >
+                            <span aria-hidden="true">{category.emoji}</span>
+                            <span>{category.name_ru}</span>
+                          </span>
+                          <span className="font-mono tabular-nums font-semibold text-ink whitespace-nowrap text-[0.92rem]">
+                            {formatMoney(amount, primaryCurrency, {
+                              compact: true,
+                            })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -1069,6 +1212,41 @@ export function ExpenseCalculator({
                       })}
                     </strong>
                   </p>
+                  {paidByPerson.length > 0 && maxPaid > 0 ? (
+                    <div className="grid gap-3">
+                      <h3 className="text-[1rem] font-bold text-ink">
+                        Кто сколько оплатил
+                      </h3>
+                      <div className="grid gap-2.5">
+                        {paidByPerson.map(({ personId, amount }) => (
+                          <div key={personId}>
+                            <div className="flex items-center justify-between gap-3 mb-1">
+                              <span className="text-[0.92rem] text-ink">
+                                {getPersonName(personId)}
+                              </span>
+                              <strong className="font-mono tabular-nums text-[0.92rem] font-semibold text-ink">
+                                {formatMoney(amount, primaryCurrency, {
+                                  compact: true,
+                                })}
+                              </strong>
+                            </div>
+                            <div className="h-2 rounded-full bg-[#F4F4F1] overflow-hidden">
+                              <div
+                                className="h-full bg-accent transition-[width]"
+                                style={{
+                                  width: `${
+                                    maxPaid > 0
+                                      ? Math.round((amount / maxPaid) * 100)
+                                      : 0
+                                  }%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <h3 className="text-[1rem] font-bold text-ink">
                     Стоимость для каждого
                   </h3>
