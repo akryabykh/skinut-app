@@ -53,7 +53,7 @@ export async function updateDisplayName(
   // Refresh pages that show display name.
   revalidatePath("/account");
   revalidatePath("/");
-  revalidatePath("/app/projects");
+  revalidatePath("/account");
 
   return { status: "success", message: "Имя сохранено" };
 }

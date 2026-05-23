@@ -1,11 +1,11 @@
 {
   "name": "Скинуться",
   "short_name": "Скинуться",
-  "description": "Калькулятор совместных расходов для мобильного браузера.",
-  "start_url": "/app",
+  "description": "Делите расходы в поездках и встречах — мультивалюта, категории, итоги переводов одной кнопкой.",
+  "start_url": "/",
   "display": "standalone",
-  "background_color": "#f6f7f2",
-  "theme_color": "#0f766e",
+  "background_color": "#FAFAF7",
+  "theme_color": "#0A0A0A",
   "icons": [
     {
       "src": "/icons/icon.svg",

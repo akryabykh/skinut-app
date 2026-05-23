@@ -31,7 +31,7 @@ export default async function NewProjectPage() {
     <main className="placeholder-page">
       <header className="topbar">
         <Brand />
-        <Link href="/app/projects" className="nav-button">
+        <Link href="/account" className="nav-button">
           Назад к проектам
         </Link>
       </header>
@@ -104,7 +104,7 @@ export default async function NewProjectPage() {
               Создать проект
             </Button>
             <Link
-              href="/app/projects"
+              href="/account"
               className="inline-flex items-center h-11 sm:h-10 px-3 text-[0.92rem] font-semibold text-muted hover:text-ink transition-colors"
             >
               Отмена

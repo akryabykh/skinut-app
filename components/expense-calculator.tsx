@@ -625,7 +625,7 @@ export function ExpenseCalculator({
           <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
             Калькулятор расходов
           </p>
-          <Brand href={isOwnedProject ? "/app/projects" : "/"} />
+          <Brand href={isOwnedProject ? "/account" : "/"} />
         </div>
         {isOwnedProject && projectId ? (
           <div className="flex items-center gap-1.5 shrink-0">

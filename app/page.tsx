@@ -30,7 +30,7 @@ export default async function HomePage() {
           {isAuthenticated ? (
             <>
               <Link
-                href="/app/projects"
+                href="/account"
                 className="hidden sm:inline-flex items-center h-10 px-3 text-[0.92rem] font-semibold text-ink hover:text-accent transition-colors"
               >
                 Мои проекты
@@ -70,7 +70,7 @@ export default async function HomePage() {
           </p>
           <div className="flex flex-wrap gap-3 pt-2">
             <LinkButton
-              href={isAuthenticated ? "/app/projects" : "/auth/sign-up"}
+              href={isAuthenticated ? "/account" : "/auth/sign-up"}
               variant="primary"
               size="cta"
             >
