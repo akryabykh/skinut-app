@@ -26,6 +26,12 @@ export type Expense = {
    * a multiplier of 1 is assumed and `amount` is treated as primary directly.
    */
   exchange_rate_used?: number;
+  /**
+   * Category id from lib/categories.ts (Block 6). Optional for backwards
+   * compatibility — missing/unknown ids fall back to "other" in the UI
+   * via getCategory().
+   */
+  category?: string;
 };
 
 export type Transfer = {

@@ -6,13 +6,21 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Download, FileText } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/modal";
-import { deleteProject } from "../actions";
+import { deleteProject, updateProjectCurrencies } from "../actions";
+import { CURRENCIES } from "@/lib/currencies";
+import { getCategory } from "@/lib/categories";
+import {
+  toPrimary,
+  type Expense,
+  type Person,
+} from "@/lib/split-calculator";
 import {
   changeRole,
   inviteMember,
@@ -30,22 +38,94 @@ import {
 
 type ProjectManagementProps = {
   projectId: string;
+  projectName: string;
   shareToken: string | null;
   members: MemberInfo[];
   currentUserId: string;
   myRole: MemberRole;
+  primaryCurrency: string;
+  secondaryCurrency: string | null;
+  hasExpenses: boolean;
+  people: Person[];
+  expenses: Expense[];
 };
 
 function memberLabel(m: MemberInfo): string {
   return m.display_name ?? m.email ?? "Без имени";
 }
 
+// Build a CSV string of the project's expenses. UTF-8 with BOM (for Excel),
+// double-quote escaping. Header row in Russian.
+function buildCsv(
+  expenses: Expense[],
+  people: Person[],
+  primaryCurrency: string,
+): string {
+  const personById = new Map(people.map((p) => [p.id, p.name]));
+  const header = [
+    "Дата",
+    "Название",
+    "Сумма",
+    "Валюта",
+    `В ${primaryCurrency}`,
+    "Категория",
+    "Плательщик",
+    "Участники",
+  ];
+  const rows = expenses.map((e) => {
+    const cat = getCategory(e.category);
+    const inPrimary = toPrimary(e);
+    return [
+      e.createdAt ? new Date(e.createdAt).toLocaleDateString("ru-RU") : "",
+      e.name,
+      e.amount.toString(),
+      e.currency ?? primaryCurrency,
+      inPrimary.toFixed(2),
+      cat.name_ru,
+      personById.get(e.payerId) ?? "—",
+      e.participantIds.map((id) => personById.get(id) ?? "—").join("; "),
+    ];
+  });
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  return [header, ...rows]
+    .map((row) => row.map(escape).join(","))
+    .join("\n");
+}
+
+function downloadAsFile(filename: string, content: string, mime: string) {
+  // UTF-8 BOM so Excel opens Russian CSVs correctly.
+  const blob = new Blob(["﻿" + content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function safeFilename(s: string): string {
+  return (
+    s
+      .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+      .replace(/\s+/g, "_")
+      .toLowerCase() || "project"
+  );
+}
+
 export function ProjectManagement({
   projectId,
+  projectName,
   shareToken,
   members,
   currentUserId,
   myRole,
+  primaryCurrency,
+  secondaryCurrency,
+  hasExpenses,
+  people,
+  expenses,
 }: ProjectManagementProps) {
   const isOwner = myRole === "owner";
   const canEdit = myRole === "owner" || myRole === "editor";
@@ -60,6 +140,39 @@ export function ProjectManagement({
     inviteMember,
     emptyMembersFormState,
   );
+
+  // Currencies edit form — uses local async state because the server
+  // action throws on error (we need both success and error in one place).
+  const [currenciesStatus, setCurrenciesStatus] = useState<{
+    kind: "idle" | "success" | "error";
+    message: string;
+  }>({ kind: "idle", message: "" });
+  const [currenciesPending, setCurrenciesPending] = useState(false);
+
+  async function handleCurrenciesSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (currenciesPending) return;
+    const formData = new FormData(event.currentTarget);
+    setCurrenciesPending(true);
+    setCurrenciesStatus({ kind: "idle", message: "" });
+    try {
+      await updateProjectCurrencies(formData);
+      setCurrenciesStatus({
+        kind: "success",
+        message: "Валюты обновлены",
+      });
+    } catch (err) {
+      setCurrenciesStatus({
+        kind: "error",
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Не удалось сохранить",
+      });
+    } finally {
+      setCurrenciesPending(false);
+    }
+  }
 
   // Build the full share URL on the client (server doesn't know origin).
   const [shareUrl, setShareUrl] = useState("");
@@ -256,6 +369,89 @@ export function ProjectManagement({
         ) : null}
       </Card>
 
+      {/* === Currencies editor === */}
+      {canEdit ? (
+        <Card className="!p-6">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-1">
+            Валюты проекта
+          </h2>
+          <p className="text-[0.92rem] text-muted leading-snug mb-5">
+            Основная — в ней считаются итоги. Дополнительная — для трат в
+            другой стране. Курс зафиксирован на момент создания траты.
+          </p>
+          <form onSubmit={handleCurrenciesSubmit} className="grid gap-3">
+            <input type="hidden" name="projectId" value={projectId} />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Основная валюта
+                </span>
+                <Select
+                  name="primary"
+                  defaultValue={primaryCurrency}
+                  required
+                  disabled={hasExpenses}
+                >
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name_ru}
+                    </option>
+                  ))}
+                </Select>
+                {hasExpenses ? (
+                  <span className="text-[0.78rem] text-muted">
+                    Заблокирована — в проекте уже есть траты с зафиксированным
+                    курсом.
+                  </span>
+                ) : null}
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Дополнительная
+                </span>
+                <Select name="secondary" defaultValue={secondaryCurrency ?? ""}>
+                  <option value="">— Не нужна</option>
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name_ru}
+                    </option>
+                  ))}
+                </Select>
+                <span className="text-[0.78rem] text-muted">
+                  Можно отключить, если в ней нет трат
+                </span>
+              </label>
+            </div>
+            {currenciesStatus.kind === "error" ? (
+              <p
+                role="alert"
+                className="rounded-control border border-danger/20 bg-[#FBEAE7] text-danger text-[0.93rem] leading-snug px-3.5 py-2.5"
+              >
+                {currenciesStatus.message}
+              </p>
+            ) : null}
+            {currenciesStatus.kind === "success" ? (
+              <p
+                role="status"
+                className="rounded-control border border-[#F8D4C5] bg-accent-soft text-accent-dark text-[0.93rem] leading-snug px-3.5 py-2.5"
+              >
+                {currenciesStatus.message}
+              </p>
+            ) : null}
+            <div>
+              <Button
+                type="submit"
+                variant="primary"
+                size="md"
+                disabled={currenciesPending}
+              >
+                {currenciesPending ? "Сохраняем…" : "Сохранить"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      ) : null}
+
       {/* === Share link === */}
       {canEdit ? (
         <Card className="!p-6">
@@ -345,10 +541,53 @@ export function ProjectManagement({
         </Card>
       ) : null}
 
+      {/* === Export === */}
+      {hasExpenses ? (
+        <Card className="!p-6">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-1">
+            Экспорт
+          </h2>
+          <p className="text-[0.92rem] text-muted leading-snug mb-4">
+            Скачайте список трат в CSV для Excel/Google Sheets или откройте
+            печатный отчёт со всеми расчётами.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="primary"
+              size="md"
+              onClick={() => {
+                const csv = buildCsv(expenses, people, primaryCurrency);
+                downloadAsFile(
+                  `${safeFilename(projectName)}.csv`,
+                  csv,
+                  "text/csv;charset=utf-8",
+                );
+              }}
+            >
+              <Download size={16} aria-hidden="true" />
+              <span>Скачать CSV</span>
+            </Button>
+            <Link
+              href={`/app/projects/${projectId}/report`}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex items-center justify-center gap-2 rounded-control font-semibold tracking-[-0.005em] h-11 sm:h-10 px-4 text-[0.95rem] bg-white text-ink border border-line hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors"
+            >
+              <FileText size={16} aria-hidden="true" />
+              <span>Открыть отчёт</span>
+            </Link>
+          </div>
+          <p className="text-[0.78rem] text-muted mt-3">
+            В отчёте нажмите ⌘P / Ctrl+P, чтобы сохранить как PDF.
+          </p>
+        </Card>
+      ) : null}
+
       {/* === Danger zone === */}
       <Card className="!p-6 !border-danger/20 !bg-[#FBEAE7]/30">
         <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-danger mb-4">
-          Опасная зона
+          Внимание
         </h2>
 
         {mustTransferBeforeLeaving ? (

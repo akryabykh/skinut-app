@@ -121,6 +121,125 @@ const deleteSchema = z.object({
   id: z.string().uuid(),
 });
 
+// Schema for editing the primary/secondary currency of an existing project.
+// Same currency-validation rules as createProjectSchema; we just guard
+// projectId as uuid here.
+const editCurrenciesSchema = z.object({
+  projectId: z.string().uuid(),
+  primary: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(isCurrencyCode, "Неподдерживаемая основная валюта"),
+  secondary: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.length > 0 ? v : null))
+    .refine(
+      (v) => v === null || isCurrencyCode(v),
+      "Неподдерживаемая дополнительная валюта",
+    ),
+});
+
+// Block 5: Edit project's primary and/or secondary currency after creation.
+//
+// Guard rails:
+//   - Cannot change primary if the project has any saved expenses — the
+//     existing exchange_rate_used multipliers were computed against the
+//     old primary; changing it would silently distort historical totals.
+//     The user must either delete those expenses or stay on the same primary.
+//   - Cannot remove secondary (or replace it with another code) if there
+//     are expenses denominated in that secondary — same logic: those rows
+//     would orphan their currency context.
+//   - primary != secondary (or secondary is null) — enforced by DB CHECK
+//     and by client-side schema.
+//
+// RLS does the authorization (only editor/owner can update app_projects).
+export async function updateProjectCurrencies(formData: FormData) {
+  const parsed = editCurrenciesSchema.safeParse({
+    projectId: formData.get("projectId"),
+    primary: formData.get("primary"),
+    secondary: formData.get("secondary"),
+  });
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? "Некорректные данные");
+  }
+
+  const { projectId, primary, secondary } = parsed.data;
+
+  if (secondary && secondary === primary) {
+    throw new Error("Дополнительная валюта должна отличаться от основной");
+  }
+
+  const { supabase } = await requireUser();
+
+  const { data: project, error: loadError } = await supabase
+    .from("app_projects")
+    .select("primary_currency, secondary_currency, payload")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (loadError || !project) {
+    throw new Error(loadError?.message ?? "Проект не найден");
+  }
+
+  const oldPrimary = project.primary_currency ?? DEFAULT_PRIMARY_CURRENCY;
+  const oldSecondary = project.secondary_currency as string | null;
+
+  // Inspect existing expenses to enforce the guard rails.
+  const payload = (project.payload ?? {}) as { expenses?: unknown };
+  const expenses = Array.isArray(payload.expenses)
+    ? (payload.expenses as Array<{ currency?: unknown }>)
+    : [];
+
+  const expenseCurrencies = new Set<string>();
+  for (const e of expenses) {
+    if (e && typeof e.currency === "string" && e.currency.length === 3) {
+      expenseCurrencies.add(e.currency.toUpperCase());
+    } else {
+      // Legacy expense with no explicit currency = treated as primary.
+      expenseCurrencies.add(oldPrimary);
+    }
+  }
+
+  // Rule 1: changing primary while expenses exist would corrupt history.
+  if (primary !== oldPrimary && expenseCurrencies.size > 0) {
+    throw new Error(
+      "Основную валюту нельзя сменить — в проекте уже есть траты с зафиксированными курсами. Удалите траты или создайте новый проект.",
+    );
+  }
+
+  // Rule 2: removing/changing secondary while there are expenses in the
+  // *old* secondary would orphan them.
+  if (
+    oldSecondary &&
+    secondary !== oldSecondary &&
+    expenseCurrencies.has(oldSecondary)
+  ) {
+    throw new Error(
+      `Нельзя удалить или сменить дополнительную валюту (${oldSecondary}) — в проекте есть траты в ней.`,
+    );
+  }
+
+  const { error: updateError } = await supabase
+    .from("app_projects")
+    .update({
+      primary_currency: primary,
+      secondary_currency: secondary,
+    })
+    .eq("id", projectId);
+
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+
+  revalidatePath(`/app/projects/${projectId}`);
+  revalidatePath("/app/projects");
+  revalidatePath("/app");
+}
+
 export async function deleteProject(formData: FormData) {
   const parsed = deleteSchema.safeParse({
     id: formData.get("id"),

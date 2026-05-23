@@ -5,6 +5,7 @@ import { Brand } from "@/components/brand";
 import { LinkButton } from "@/components/ui/button";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrency } from "@/lib/currencies";
+import type { Expense, Person } from "@/lib/split-calculator";
 import { listProjectMembers } from "../members-actions";
 import { ROLE_LABEL_RU } from "../members-state";
 import { ProjectManagement } from "./project-management";
@@ -28,7 +29,9 @@ export default async function ProjectDetailPage({
 
   const { data: project } = await supabase
     .from("app_projects")
-    .select("id, name, share_token, primary_currency, secondary_currency")
+    .select(
+      "id, name, share_token, primary_currency, secondary_currency, payload",
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -48,6 +51,24 @@ export default async function ProjectDetailPage({
   const secondary = project.secondary_currency;
   const primaryInfo = getCurrency(primary);
   const secondaryInfo = secondary ? getCurrency(secondary) : null;
+
+  // Parse payload once — used by the currencies editor (hasExpenses)
+  // and by the export buttons (people, expenses).
+  const payload = (project.payload ?? {}) as {
+    people?: unknown;
+    expenses?: unknown;
+  };
+  const people: Person[] = Array.isArray(payload.people)
+    ? (payload.people as Person[]).filter(
+        (p) => p && typeof p.id === "string" && typeof p.name === "string",
+      )
+    : [];
+  const expenses: Expense[] = Array.isArray(payload.expenses)
+    ? (payload.expenses as Expense[]).filter(
+        (e) => e && e.id && e.payerId && Number(e.amount) > 0,
+      )
+    : [];
+  const hasExpenses = expenses.length > 0;
 
   return (
     <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
@@ -101,10 +122,16 @@ export default async function ProjectDetailPage({
 
         <ProjectManagement
           projectId={project.id}
+          projectName={project.name}
           shareToken={project.share_token}
           members={members}
           currentUserId={user.id}
           myRole={myMembership.role}
+          primaryCurrency={primary}
+          secondaryCurrency={secondary}
+          hasExpenses={hasExpenses}
+          people={people}
+          expenses={expenses}
         />
       </section>
     </main>
