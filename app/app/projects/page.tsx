@@ -168,7 +168,6 @@ export default async function ProjectsPage() {
                         href={`/app/projects/${project.id}`}
                         className="pointer-events-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-control border border-line bg-white text-[0.82rem] font-semibold text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors"
                         aria-label={`Настройки проекта «${project.name}»`}
-                        onClick={(e) => e.stopPropagation()}
                       >
                         <Settings size={13} aria-hidden="true" />
                         <span>Настройки проекта</span>
