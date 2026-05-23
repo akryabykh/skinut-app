@@ -45,6 +45,38 @@ export async function enableShare(formData: FormData): Promise<void> {
   revalidatePath(`/app/projects/${parsed.data.projectId}`);
 }
 
+// One-click variant for the calculator's «Поделиться» button: if the
+// project already has a share_token, return it as-is. Otherwise mint a
+// fresh uuid, persist it, and return that. RLS still enforces that only
+// editor/owner can write — viewers will get an error from the update
+// branch and the button hides for them on the client anyway.
+export async function ensureShareToken(projectId: string): Promise<string> {
+  const parsed = projectIdSchema.safeParse({ projectId });
+  if (!parsed.success) throw new Error("Некорректный id");
+
+  const { supabase } = await requireUser();
+
+  // Fast-path: token already there.
+  const { data: existing, error: readError } = await supabase
+    .from("app_projects")
+    .select("share_token")
+    .eq("id", parsed.data.projectId)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
+  if (existing?.share_token) return existing.share_token;
+
+  // Need to mint a token. RLS UPDATE policy gates editor/owner.
+  const newToken = crypto.randomUUID();
+  const { error: writeError } = await supabase
+    .from("app_projects")
+    .update({ share_token: newToken })
+    .eq("id", parsed.data.projectId);
+  if (writeError) throw new Error(writeError.message);
+
+  revalidatePath(`/app/projects/${parsed.data.projectId}`);
+  return newToken;
+}
+
 // Removes the share_token. Existing public links stop working.
 export async function disableShare(formData: FormData): Promise<void> {
   const parsed = projectIdSchema.safeParse({
