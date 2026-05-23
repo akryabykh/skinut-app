@@ -468,16 +468,29 @@ export function ProjectManagement({
           </p>
           <form onSubmit={handleCurrenciesSubmit} className="grid gap-3">
             <input type="hidden" name="projectId" value={projectId} />
+            {/* Important: `disabled` на <select> исключает поле из
+                FormData, и Zod на сервере падает с «Неподдерживаемая
+                основная валюта». Поэтому когда primary заблокирован
+                (в проекте уже есть траты), кладём значение в hidden
+                input, а сам Select оставляем только для отображения. */}
+            {hasExpenses ? (
+              <input
+                type="hidden"
+                name="primary"
+                value={selectedPrimary}
+                readOnly
+              />
+            ) : null}
             <div className="grid sm:grid-cols-2 gap-3">
               <label className="grid gap-1.5">
                 <span className="text-[0.82rem] font-medium text-muted">
                   Основная валюта
                 </span>
                 <Select
-                  name="primary"
+                  name={hasExpenses ? undefined : "primary"}
                   value={selectedPrimary}
                   onChange={(e) => setSelectedPrimary(e.target.value)}
-                  required
+                  required={!hasExpenses}
                   disabled={hasExpenses}
                 >
                   {CURRENCIES.map((c) => (
