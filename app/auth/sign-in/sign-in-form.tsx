@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { signIn } from "../actions";
 import { emptyAuthFormState } from "../state";
 
@@ -11,7 +12,16 @@ export function SignInForm() {
   const [state, formAction, pending] = useActionState(signIn, emptyAuthFormState);
 
   return (
-    <form action={formAction} className="grid gap-4" noValidate>
+    <div className="grid gap-4">
+      <GoogleSignInButton label="Войти через Google" />
+      <div className="flex items-center gap-3" aria-hidden="true">
+        <span className="flex-1 h-px bg-line" />
+        <span className="text-[0.78rem] text-muted uppercase tracking-[0.08em]">
+          или email
+        </span>
+        <span className="flex-1 h-px bg-line" />
+      </div>
+      <form action={formAction} className="grid gap-4" noValidate>
       <label className="grid gap-1.5">
         <span className="text-[0.82rem] font-medium text-muted">Email</span>
         <Input
@@ -67,5 +77,6 @@ export function SignInForm() {
         </Link>
       </p>
     </form>
+    </div>
   );
 }

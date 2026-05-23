@@ -85,7 +85,7 @@ export async function createProject(formData: FormData) {
     throw new Error(error?.message ?? "Не удалось создать проект");
   }
 
-  revalidatePath("/app/projects");
+  revalidatePath("/account");
   redirect(`/app?project=${projectId}`);
 }
 
@@ -114,7 +114,7 @@ export async function renameProject(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/app/projects");
+  revalidatePath("/account");
 }
 
 const deleteSchema = z.object({
@@ -236,7 +236,7 @@ export async function updateProjectCurrencies(formData: FormData) {
   }
 
   revalidatePath(`/app/projects/${projectId}`);
-  revalidatePath("/app/projects");
+  revalidatePath("/account");
   revalidatePath("/app");
 }
 
@@ -259,7 +259,7 @@ export async function deleteProject(formData: FormData) {
     throw new Error(error.message);
   }
 
-  revalidatePath("/app/projects");
+  revalidatePath("/account");
 }
 
 // Save the calculator's JSON state into the project row.

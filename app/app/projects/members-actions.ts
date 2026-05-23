@@ -257,8 +257,8 @@ export async function leaveProject(formData: FormData): Promise<void> {
 
   // Project may have been auto-deleted by trigger. Either way, send
   // the user back to their projects list.
-  revalidatePath("/app/projects");
-  redirect("/app/projects");
+  revalidatePath("/account");
+  redirect("/account");
 }
 
 // ============================================================

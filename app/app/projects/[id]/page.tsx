@@ -75,7 +75,7 @@ export default async function ProjectDetailPage({
       <header className="flex items-center justify-between gap-3 mb-8">
         <Brand href="/" />
         <Link
-          href="/app/projects"
+          href="/account"
           className="inline-flex items-center gap-1.5 h-10 px-3 text-[0.92rem] font-semibold text-ink hover:text-accent transition-colors"
         >
           <ArrowLeft size={16} aria-hidden="true" />

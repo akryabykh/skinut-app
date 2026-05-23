@@ -123,3 +123,42 @@ export async function signOut() {
   await supabase.auth.signOut();
   redirect("/");
 }
+
+// Block 11: One-click Google OAuth.
+//
+// Calls Supabase's signInWithOAuth on the server to get back an
+// `accounts.google.com/...` URL, then redirects the user there. Google
+// authenticates, sends them back to our /auth/callback with ?code=...,
+// and the existing route handler exchanges that for a real session.
+//
+// Requires Google provider to be enabled in Supabase Dashboard with a
+// valid OAuth Client ID/Secret from Google Cloud Console.
+export async function signInWithGoogle() {
+  const supabase = await createSupabaseServerClient();
+
+  const redirectTo = publicConfig.publicBaseUrl
+    ? `${publicConfig.publicBaseUrl}/auth/callback`
+    : undefined;
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo,
+      // Always ask for an email + profile (default scope) — no extra needed.
+      queryParams: {
+        access_type: "offline", // get refresh_token from Google too
+        prompt: "select_account", // let the user pick which Google account
+      },
+    },
+  });
+
+  if (error) {
+    throw new Error(`Не удалось начать вход через Google: ${error.message}`);
+  }
+
+  if (data?.url) {
+    redirect(data.url);
+  }
+
+  throw new Error("Supabase не вернул URL для Google OAuth");
+}
