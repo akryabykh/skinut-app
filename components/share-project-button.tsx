@@ -1,68 +1,77 @@
 "use client";
 
-import Link from "next/link";
-import { Share2 } from "lucide-react";
+import { useState } from "react";
+import { Loader2, Share2 } from "lucide-react";
+import { ensureShareToken } from "@/app/app/projects/share-actions";
 
 type ShareProjectButtonProps = {
   projectId: string;
+  /** Existing share token if owner/editor already minted one. Optimisation
+   *  only — we still call ensureShareToken on click to guard against UI
+   *  staleness; if a token already exists the server returns it instantly. */
   shareToken: string | null;
   onCopied?: () => void;
   onCopyFailed?: (url: string) => void;
+  onError?: (message: string) => void;
 };
 
 /**
- * Compact "Поделиться" trigger that lives in the calculator header
- * (Block 12 (7)). Two states:
+ * "Поделиться" — one-click share for the calculator header.
  *
- *   - `shareToken == null` → renders as a <Link> to the project's
- *     settings page where the user can mint a token. Visually identical
- *     to the button so it doesn't pop out of the header layout.
- *   - `shareToken` set → renders a <button> that copies the public
- *     /share/<token> URL via the Clipboard API and fires `onCopied()`
- *     (the calculator wires it to a Toast). Fallback when clipboard is
- *     denied: `onCopyFailed(url)` so the calculator can surface a manual
- *     prompt with the link.
+ * Flow: click → server action `ensureShareToken(projectId)` (returns
+ * either the existing token or mints a new one) → build /share/<token>
+ * URL → copy to clipboard via `navigator.clipboard.writeText()` → fire
+ * `onCopied()` so the parent can surface a toast.
+ *
+ * No drawer/modal — the contract is "click and the link is in your buffer,
+ * paste it wherever you want". Matches the way Twitter / Telegram do
+ * one-click share-URL copying.
  */
 export function ShareProjectButton({
   projectId,
   shareToken,
   onCopied,
   onCopyFailed,
+  onError,
 }: ShareProjectButtonProps) {
-  const baseClass =
-    "inline-flex items-center justify-center h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors gap-1.5";
+  const [busy, setBusy] = useState(false);
 
-  if (!shareToken) {
-    return (
-      <Link
-        href={`/app/projects/${projectId}`}
-        aria-label="Поделиться проектом — создать публичную ссылку"
-        className={baseClass}
-      >
-        <Share2 size={16} aria-hidden="true" />
-        <span className="hidden sm:inline text-[0.88rem] font-semibold">
-          Поделиться
-        </span>
-      </Link>
-    );
+  async function handleClick() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const token = shareToken ?? (await ensureShareToken(projectId));
+      const url = `${window.location.origin}/share/${token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        onCopied?.();
+      } catch {
+        onCopyFailed?.(url);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Не удалось создать ссылку";
+      onError?.(message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <button
       type="button"
-      onClick={async () => {
-        const url = `${window.location.origin}/share/${shareToken}`;
-        try {
-          await navigator.clipboard.writeText(url);
-          onCopied?.();
-        } catch {
-          onCopyFailed?.(url);
-        }
-      }}
-      aria-label="Скопировать ссылку для участников"
-      className={baseClass}
+      onClick={handleClick}
+      disabled={busy}
+      aria-label="Поделиться проектом"
+      className="inline-flex items-center justify-center gap-1.5 h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors disabled:opacity-60"
     >
-      <Share2 size={16} aria-hidden="true" />
+      {busy ? (
+        <Loader2 size={16} aria-hidden="true" className="animate-spin" />
+      ) : (
+        <Share2 size={16} aria-hidden="true" />
+      )}
       <span className="hidden sm:inline text-[0.88rem] font-semibold">
         Поделиться
       </span>
