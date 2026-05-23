@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Brand } from "@/components/brand";
+import { ArrowLeft } from "lucide-react";
+import { AppHeader } from "@/components/app-header/app-header";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -13,11 +15,6 @@ import { CURRENCIES, DEFAULT_PRIMARY_CURRENCY } from "@/lib/currencies";
 // Real form: project name + main currency (required) + secondary currency
 // (optional). Submit triggers the createProject server action which
 // redirects to /app?project=<id> on success.
-//
-// Block 4 reshape: this used to be a server component that called
-// createProject() immediately and returned null. Now it shows a form so
-// the user can pick currencies up front (the trip-to-Turkey scenario:
-// primary RUB + secondary TRY).
 export default async function NewProjectPage() {
   const supabase = await createSupabaseServerClient();
   const {
@@ -27,19 +24,44 @@ export default async function NewProjectPage() {
     redirect("/auth/sign-in");
   }
 
-  return (
-    <main className="placeholder-page">
-      <header className="topbar">
-        <Brand />
-        <Link href="/account" className="nav-button">
-          Назад к проектам
-        </Link>
-      </header>
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name, email, avatar_url")
+    .eq("id", user.id)
+    .maybeSingle();
+  const email = user.email ?? profile?.email ?? "—";
+  const fallbackName =
+    user.email && user.email.includes("@")
+      ? user.email.split("@")[0]
+      : "Пользователь";
+  const displayName = profile?.display_name ?? fallbackName;
+  const avatarUrl = profile?.avatar_url ?? null;
 
-      <section className="placeholder-panel">
-        <p className="eyebrow">Новый проект</p>
-        <h1>Заведём расчёт</h1>
-        <p>
+  return (
+    <main className="mx-auto w-full max-w-[640px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
+      <AppHeader
+        displayName={displayName}
+        avatarUrl={avatarUrl}
+        email={email}
+        active="projects"
+      />
+
+      <Link
+        href="/app/projects"
+        className="inline-flex items-center gap-1.5 mb-4 text-[0.88rem] font-semibold text-muted hover:text-ink transition-colors"
+      >
+        <ArrowLeft size={14} aria-hidden="true" />
+        <span>К списку проектов</span>
+      </Link>
+
+      <Card className="!p-6">
+        <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted mb-2">
+          Новый проект
+        </p>
+        <h1 className="text-[2rem] font-bold tracking-[-0.025em] text-ink leading-tight mb-2">
+          Заведём расчёт
+        </h1>
+        <p className="text-[0.95rem] text-muted leading-snug mb-6">
           Назовите проект, выберите основную валюту — итоги переводов будут
           считаться в ней. Можно добавить вторую валюту, если часть трат
           будет в другой стране.
@@ -104,14 +126,14 @@ export default async function NewProjectPage() {
               Создать проект
             </Button>
             <Link
-              href="/account"
+              href="/app/projects"
               className="inline-flex items-center h-11 sm:h-10 px-3 text-[0.92rem] font-semibold text-muted hover:text-ink transition-colors"
             >
               Отмена
             </Link>
           </div>
         </form>
-      </section>
+      </Card>
     </main>
   );
 }

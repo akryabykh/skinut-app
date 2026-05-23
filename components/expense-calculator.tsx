@@ -11,8 +11,11 @@ import {
 } from "react";
 import {
   ArrowRight,
+  Check,
   ChevronDown,
+  CloudOff,
   ListChecks,
+  Loader2,
   Pencil,
   Plus,
   Receipt,
@@ -31,6 +34,7 @@ import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { CategoryDonut } from "@/components/ui/category-donut";
+import { ShareProjectButton } from "@/components/share-project-button";
 import {
   fetchCurrentRate,
   saveProjectPayload,
@@ -76,7 +80,12 @@ type ExpenseCalculatorProps = {
   canEdit?: boolean;
   primaryCurrency?: string;
   secondaryCurrency?: string | null;
+  /** Share token if the owner/editor enabled the public link. Powers the
+   *  "Поделиться" button in the calculator header. */
+  shareToken?: string | null;
 };
+
+type SyncStatus = "idle" | "saving" | "saved" | "error";
 
 const STORAGE_KEY = "split-app-state-v1";
 
@@ -173,6 +182,7 @@ export function ExpenseCalculator({
   canEdit = true,
   primaryCurrency = DEFAULT_PRIMARY_CURRENCY,
   secondaryCurrency = null,
+  shareToken = null,
 }: ExpenseCalculatorProps = {}) {
   const isOwnedProject = Boolean(projectId);
   const isReadOnly = !canEdit;
@@ -214,6 +224,13 @@ export function ExpenseCalculator({
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
 
+  // Block 12 (8): user-visible sync indicator. Reflects the calculator's
+  // save lifecycle (`saving` → `saved` after a debounce round-trip, or
+  // `error` if the server action throws). Guests using localStorage only
+  // ever stay in `idle` — there's no remote sync to surface.
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const syncResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { showToast, toast } = useToast();
 
@@ -234,6 +251,7 @@ export function ExpenseCalculator({
     setIsReady(true);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (syncResetTimer.current) clearTimeout(syncResetTimer.current);
     };
   }, [isOwnedProject]);
 
@@ -251,11 +269,30 @@ export function ExpenseCalculator({
     (nextState: ProjectState) => {
       if (isReadOnly) return;
       if (isOwnedProject && projectId) {
+        // Immediately flip to "saving" — user sees feedback before the
+        // 600ms debounce even kicks in.
+        setSyncStatus("saving");
+        if (syncResetTimer.current) {
+          clearTimeout(syncResetTimer.current);
+          syncResetTimer.current = null;
+        }
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
-          saveProjectPayload(projectId, nextState).catch((error: unknown) => {
-            console.warn("Unable to save project", error);
-          });
+          saveProjectPayload(projectId, nextState)
+            .then(() => {
+              setSyncStatus("saved");
+              // Fade "saved" back to idle so it doesn't sit forever.
+              syncResetTimer.current = setTimeout(() => {
+                setSyncStatus((current) =>
+                  current === "saved" ? "idle" : current,
+                );
+                syncResetTimer.current = null;
+              }, 2000);
+            })
+            .catch((error: unknown) => {
+              console.warn("Unable to save project", error);
+              setSyncStatus("error");
+            });
         }, 600);
       } else {
         try {
@@ -404,11 +441,20 @@ export function ExpenseCalculator({
     );
     if (isUsed) {
       showToast(
-        "Участник в расходах. Сначала удалите связанные расходы.",
+        "Участник в тратах. Сначала удалите его траты.",
         "error",
       );
       return;
     }
+    const person = state.people.find((p) => p.id === personId);
+    const ok = await confirm({
+      title: `Удалить ${person?.name ?? "участника"}?`,
+      description: "Участник пропадёт из списка. Это нельзя отменить.",
+      confirmLabel: "Удалить",
+      cancelLabel: "Отмена",
+      variant: "danger",
+    });
+    if (!ok) return;
     commitState({
       ...state,
       people: state.people.filter((p) => p.id !== personId),
@@ -620,15 +666,28 @@ export function ExpenseCalculator({
   return (
     <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
       {/* === Header === */}
-      <header className="flex items-center justify-between gap-3 mb-6">
+      <header className="flex items-center justify-between gap-3 mb-6 flex-wrap">
         <div className="grid gap-1 min-w-0">
-          <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
-            Калькулятор расходов
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
+              Калькулятор расходов
+            </p>
+            {isOwnedProject ? <SyncIndicator status={syncStatus} /> : null}
+          </div>
           <Brand href={isOwnedProject ? "/account" : "/"} />
         </div>
         {isOwnedProject && projectId ? (
           <div className="flex items-center gap-1.5 shrink-0">
+            {canEdit ? (
+              <ShareProjectButton
+                projectId={projectId}
+                shareToken={shareToken}
+                onCopied={() => showToast("Ссылка скопирована")}
+                onCopyFailed={(url) =>
+                  showToast(`Скопируйте вручную: ${url}`, "error")
+                }
+              />
+            ) : null}
             <Link
               href="/account"
               className="inline-flex items-center justify-center h-10 sm:h-9 px-2 sm:px-3 rounded-control border border-line bg-white text-ink hover:border-[#D4D4D8] hover:bg-[#F4F4F1] transition-colors gap-1.5"
@@ -646,7 +705,7 @@ export function ExpenseCalculator({
             >
               <Settings size={16} aria-hidden="true" />
               <span className="hidden sm:inline text-[0.88rem] font-semibold">
-                Настройки
+                Настройки проекта
               </span>
             </Link>
           </div>
@@ -1347,6 +1406,33 @@ function CurrencyToggle({
     >
       {label}
     </button>
+  );
+}
+
+function SyncIndicator({ status }: { status: SyncStatus }) {
+  if (status === "idle") return null;
+  if (status === "saving") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[0.72rem] font-medium text-muted">
+        <Loader2 size={12} aria-hidden="true" className="animate-spin" />
+        <span>Сохраняется…</span>
+      </span>
+    );
+  }
+  if (status === "saved") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[0.72rem] font-medium text-accent-dark">
+        <Check size={12} aria-hidden="true" />
+        <span>Сохранено</span>
+      </span>
+    );
+  }
+  // error
+  return (
+    <span className="inline-flex items-center gap-1 text-[0.72rem] font-medium text-danger">
+      <CloudOff size={12} aria-hidden="true" />
+      <span>Не сохранено</span>
+    </span>
   );
 }
 

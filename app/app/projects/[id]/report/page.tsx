@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SavePdfButton } from "./save-pdf-button";
 import {
   calculatePersonalCosts,
   calculateTransfers,
@@ -111,16 +112,19 @@ export default async function ProjectReportPage({
   return (
     <main className="mx-auto w-full max-w-[800px] px-6 sm:px-10 py-10 bg-white text-ink print:py-6 print:px-8">
       {/* Print helper bar — hidden when printing. */}
-      <div className="flex items-center justify-between gap-4 mb-8 print:hidden">
-        <p className="text-[0.85rem] text-muted">
-          Отчёт по проекту. Нажмите <kbd className="px-1.5 py-0.5 border border-line rounded-[4px] text-[0.78rem] font-mono">⌘P</kbd> или <kbd className="px-1.5 py-0.5 border border-line rounded-[4px] text-[0.78rem] font-mono">Ctrl+P</kbd> и выберите «Сохранить как PDF».
-        </p>
+      <div className="flex items-center flex-wrap justify-between gap-4 mb-8 print:hidden">
         <a
           href={`/app/projects/${project.id}`}
           className="text-[0.85rem] text-accent hover:text-accent-dark font-semibold"
         >
           ← Назад к проекту
         </a>
+        <div className="flex items-center gap-3">
+          <span className="hidden sm:inline text-[0.78rem] text-muted">
+            или <kbd className="px-1.5 py-0.5 border border-line rounded-[4px] text-[0.72rem] font-mono">⌘P</kbd> / <kbd className="px-1.5 py-0.5 border border-line rounded-[4px] text-[0.72rem] font-mono">Ctrl+P</kbd>
+          </span>
+          <SavePdfButton />
+        </div>
       </div>
 
       {/* Header */}
