@@ -12,7 +12,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/modal";
-import { deleteProject } from "../actions";
+import { deleteProject, updateProjectCurrencies } from "../actions";
+import { CURRENCIES } from "@/lib/currencies";
 import {
   changeRole,
   inviteMember,
@@ -34,6 +35,9 @@ type ProjectManagementProps = {
   members: MemberInfo[];
   currentUserId: string;
   myRole: MemberRole;
+  primaryCurrency: string;
+  secondaryCurrency: string | null;
+  hasExpenses: boolean;
 };
 
 function memberLabel(m: MemberInfo): string {
@@ -46,6 +50,9 @@ export function ProjectManagement({
   members,
   currentUserId,
   myRole,
+  primaryCurrency,
+  secondaryCurrency,
+  hasExpenses,
 }: ProjectManagementProps) {
   const isOwner = myRole === "owner";
   const canEdit = myRole === "owner" || myRole === "editor";
@@ -60,6 +67,39 @@ export function ProjectManagement({
     inviteMember,
     emptyMembersFormState,
   );
+
+  // Currencies edit form — uses local async state because the server
+  // action throws on error (we need both success and error in one place).
+  const [currenciesStatus, setCurrenciesStatus] = useState<{
+    kind: "idle" | "success" | "error";
+    message: string;
+  }>({ kind: "idle", message: "" });
+  const [currenciesPending, setCurrenciesPending] = useState(false);
+
+  async function handleCurrenciesSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (currenciesPending) return;
+    const formData = new FormData(event.currentTarget);
+    setCurrenciesPending(true);
+    setCurrenciesStatus({ kind: "idle", message: "" });
+    try {
+      await updateProjectCurrencies(formData);
+      setCurrenciesStatus({
+        kind: "success",
+        message: "Валюты обновлены",
+      });
+    } catch (err) {
+      setCurrenciesStatus({
+        kind: "error",
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "Не удалось сохранить",
+      });
+    } finally {
+      setCurrenciesPending(false);
+    }
+  }
 
   // Build the full share URL on the client (server doesn't know origin).
   const [shareUrl, setShareUrl] = useState("");
@@ -256,6 +296,89 @@ export function ProjectManagement({
         ) : null}
       </Card>
 
+      {/* === Currencies editor === */}
+      {canEdit ? (
+        <Card className="!p-6">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-1">
+            Валюты проекта
+          </h2>
+          <p className="text-[0.92rem] text-muted leading-snug mb-5">
+            Основная — в ней считаются итоги. Дополнительная — для трат в
+            другой стране. Курс зафиксирован на момент создания траты.
+          </p>
+          <form onSubmit={handleCurrenciesSubmit} className="grid gap-3">
+            <input type="hidden" name="projectId" value={projectId} />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Основная валюта
+                </span>
+                <Select
+                  name="primary"
+                  defaultValue={primaryCurrency}
+                  required
+                  disabled={hasExpenses}
+                >
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name_ru}
+                    </option>
+                  ))}
+                </Select>
+                {hasExpenses ? (
+                  <span className="text-[0.78rem] text-muted">
+                    Заблокирована — в проекте уже есть траты с зафиксированным
+                    курсом.
+                  </span>
+                ) : null}
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-[0.82rem] font-medium text-muted">
+                  Дополнительная
+                </span>
+                <Select name="secondary" defaultValue={secondaryCurrency ?? ""}>
+                  <option value="">— Не нужна</option>
+                  {CURRENCIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} — {c.name_ru}
+                    </option>
+                  ))}
+                </Select>
+                <span className="text-[0.78rem] text-muted">
+                  Можно отключить, если в ней нет трат
+                </span>
+              </label>
+            </div>
+            {currenciesStatus.kind === "error" ? (
+              <p
+                role="alert"
+                className="rounded-control border border-danger/20 bg-[#FBEAE7] text-danger text-[0.93rem] leading-snug px-3.5 py-2.5"
+              >
+                {currenciesStatus.message}
+              </p>
+            ) : null}
+            {currenciesStatus.kind === "success" ? (
+              <p
+                role="status"
+                className="rounded-control border border-[#F8D4C5] bg-accent-soft text-accent-dark text-[0.93rem] leading-snug px-3.5 py-2.5"
+              >
+                {currenciesStatus.message}
+              </p>
+            ) : null}
+            <div>
+              <Button
+                type="submit"
+                variant="primary"
+                size="md"
+                disabled={currenciesPending}
+              >
+                {currenciesPending ? "Сохраняем…" : "Сохранить"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      ) : null}
+
       {/* === Share link === */}
       {canEdit ? (
         <Card className="!p-6">
@@ -348,7 +471,7 @@ export function ProjectManagement({
       {/* === Danger zone === */}
       <Card className="!p-6 !border-danger/20 !bg-[#FBEAE7]/30">
         <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-danger mb-4">
-          Опасная зона
+          Внимание
         </h2>
 
         {mustTransferBeforeLeaving ? (

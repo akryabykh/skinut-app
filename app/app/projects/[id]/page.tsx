@@ -28,7 +28,9 @@ export default async function ProjectDetailPage({
 
   const { data: project } = await supabase
     .from("app_projects")
-    .select("id, name, share_token, primary_currency, secondary_currency")
+    .select(
+      "id, name, share_token, primary_currency, secondary_currency, payload",
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -48,6 +50,11 @@ export default async function ProjectDetailPage({
   const secondary = project.secondary_currency;
   const primaryInfo = getCurrency(primary);
   const secondaryInfo = secondary ? getCurrency(secondary) : null;
+
+  // Used by the currencies editor to lock primary if any expense exists.
+  const payload = (project.payload ?? {}) as { expenses?: unknown };
+  const hasExpenses =
+    Array.isArray(payload.expenses) && payload.expenses.length > 0;
 
   return (
     <main className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-[calc(env(safe-area-inset-top)+24px)] pb-16">
@@ -105,6 +112,9 @@ export default async function ProjectDetailPage({
           members={members}
           currentUserId={user.id}
           myRole={myMembership.role}
+          primaryCurrency={primary}
+          secondaryCurrency={secondary}
+          hasExpenses={hasExpenses}
         />
       </section>
     </main>
