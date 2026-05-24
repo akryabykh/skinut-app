@@ -588,9 +588,9 @@ async function enrichPayloadCurrencies(
     ...(ctx.secondary ? [ctx.secondary] : []),
   ]);
 
-  // Cache rate lookups inside a single save — most trips have one secondary
-  // currency, so we'll fetch the rate at most once per request.
-  const rateCache = new Map<string, number>();
+  // (Block 13: rateCache был нужен когда мы фетчили live rate для каждой
+  // новой траты. Теперь стампим ровно один ctx.manualRate без сетевых
+  // вызовов, кэш стал лишним.)
 
   const enrichedExpenses = await Promise.all(
     (obj.expenses as IncomingExpense[]).map(async (expense) => {
