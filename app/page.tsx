@@ -81,10 +81,17 @@ export default async function HomePage() {
               <LinkButton href="/app" variant="secondary" size="cta">
                 Открыть калькулятор
               </LinkButton>
-            ) : null}
+            ) : (
+              <LinkButton href="/app" variant="secondary" size="cta">
+                <span>Просто посчитать</span>
+                <ArrowRight size={18} aria-hidden="true" />
+              </LinkButton>
+            )}
           </div>
           <p className="text-[0.85rem] text-muted pt-1">
-            Без рекламы. Данные хранятся только у вас.
+            {isAuthenticated
+              ? "Без рекламы. Данные хранятся только у вас."
+              : "Без рекламы. Считать можно без регистрации — расчёт сохранится в браузере."}
           </p>
         </div>
 

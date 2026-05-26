@@ -35,6 +35,8 @@ import { useToast } from "@/components/ui/toast";
 import { CategoryDonut } from "@/components/ui/category-donut";
 import { ShareProjectButton } from "@/components/share-project-button";
 import { AppHeader } from "@/components/app-header/app-header";
+import { GuestNudgeBanner } from "@/components/guest-nudge-banner";
+import { GUEST_STORAGE_KEY } from "@/lib/guest-storage";
 import {
   fetchCurrentRate,
   saveProjectPayload,
@@ -100,7 +102,9 @@ type ExpenseCalculatorProps = {
 
 type SyncStatus = "idle" | "saving" | "saved" | "error";
 
-const STORAGE_KEY = "split-app-state-v1";
+// Canonical key lives in lib/guest-storage.ts — re-export here under the
+// historical name so the rest of this file's references stay unchanged.
+const STORAGE_KEY = GUEST_STORAGE_KEY;
 
 const DEFAULT_STATE: ProjectState = {
   projectName: "Событие",
@@ -227,6 +231,13 @@ export function ExpenseCalculator({
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>(
     [],
+  );
+  // Shares-based split: when ON, expense.shares is persisted with per-
+  // participant weights (default 1 each). Equal split when OFF (the
+  // legacy / default behaviour). Empty record means "all selected get 1".
+  const [expenseSharesMode, setExpenseSharesMode] = useState(false);
+  const [expenseShares, setExpenseShares] = useState<Record<string, number>>(
+    {},
   );
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [lastAddedExpenseId, setLastAddedExpenseId] = useState<string | null>(
@@ -485,6 +496,8 @@ export function ExpenseCalculator({
     setSelectedParticipantIds(state.people.map((p) => p.id));
     setExpenseCurrency(primaryCurrency);
     setExpenseCategory(DEFAULT_CATEGORY);
+    setExpenseSharesMode(false);
+    setExpenseShares({});
   }
 
   function startEditingExpense(expense: Expense) {
@@ -499,6 +512,13 @@ export function ExpenseCalculator({
         ? expense.category
         : DEFAULT_CATEGORY,
     );
+    if (expense.shares && Object.keys(expense.shares).length > 0) {
+      setExpenseSharesMode(true);
+      setExpenseShares({ ...expense.shares });
+    } else {
+      setExpenseSharesMode(false);
+      setExpenseShares({});
+    }
     setLastAddedExpenseId(null);
     // Scroll the form into view so the user sees what they're editing.
     setTimeout(() => {
@@ -591,6 +611,25 @@ export function ExpenseCalculator({
       ? expenseCategory
       : DEFAULT_CATEGORY;
 
+    // Build shares payload to persist, if the user enabled weighted split.
+    // Skip the field when (a) mode is off, (b) only one participant (no
+    // splitting needed), or (c) all weights are equal — then equal-split
+    // gives the same result and we keep payloads slim.
+    let sharesToSave: Record<string, number> | undefined;
+    if (expenseSharesMode && selectedParticipantIds.length > 1) {
+      const weights = selectedParticipantIds.map(
+        (id) => Math.max(0, Number(expenseShares[id] ?? 1)),
+      );
+      const allEqual = weights.every((w) => w === weights[0]);
+      const anyNonZero = weights.some((w) => w > 0);
+      if (!allEqual && anyNonZero) {
+        sharesToSave = {};
+        selectedParticipantIds.forEach((id, idx) => {
+          sharesToSave![id] = weights[idx];
+        });
+      }
+    }
+
     if (isEditing && existing) {
       // Update in place.
       commitState({
@@ -606,6 +645,7 @@ export function ExpenseCalculator({
                 currency: expenseCurrency,
                 exchange_rate_used: exchangeRate,
                 category,
+                shares: sharesToSave,
               }
             : e,
         ),
@@ -630,6 +670,7 @@ export function ExpenseCalculator({
             currency: expenseCurrency,
             exchange_rate_used: exchangeRate,
             category,
+            shares: sharesToSave,
           },
         ],
       });
@@ -707,15 +748,18 @@ export function ExpenseCalculator({
           active="projects"
         />
       ) : (
-        // Guest mode: simple branding only.
-        <header className="flex items-center mb-8">
-          <div className="grid gap-1">
-            <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
-              Калькулятор расходов
-            </p>
-            <Brand href="/" />
-          </div>
-        </header>
+        // Guest mode: simple branding + nudge banner.
+        <>
+          <header className="flex items-center mb-6">
+            <div className="grid gap-1">
+              <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
+                Калькулятор расходов
+              </p>
+              <Brand href="/" />
+            </div>
+          </header>
+          <GuestNudgeBanner />
+        </>
       )}
 
       {/* === Project actions bar — sync state + share + settings === */}
@@ -1033,6 +1077,139 @@ export function ExpenseCalculator({
                   )}
                 </div>
               </fieldset>
+
+              {selectedParticipantIds.length >= 2 ? (
+                <div className="grid gap-2">
+                  <label className="inline-flex items-center gap-2 text-[0.92rem] text-ink cursor-pointer self-start">
+                    <input
+                      type="checkbox"
+                      checked={expenseSharesMode}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setExpenseSharesMode(next);
+                        if (next) {
+                          // Seed all selected with 1 so the steppers
+                          // start at a sensible value.
+                          setExpenseShares((prev) => {
+                            const seeded: Record<string, number> = { ...prev };
+                            selectedParticipantIds.forEach((id) => {
+                              if (typeof seeded[id] !== "number") seeded[id] = 1;
+                            });
+                            return seeded;
+                          });
+                        }
+                      }}
+                      className="h-4 w-4 accent-accent"
+                    />
+                    <span>Распределить по долям</span>
+                    <span className="text-[0.78rem] text-muted">
+                      (например, 2 / 1)
+                    </span>
+                  </label>
+
+                  {expenseSharesMode ? (
+                    <fieldset className="rounded-control border border-line p-3 min-w-0">
+                      <legend className="px-1.5 text-[0.78rem] font-medium text-muted">
+                        Доли
+                      </legend>
+                      <div className="grid gap-2">
+                        {selectedParticipantIds.map((personId) => {
+                          const person = state.people.find(
+                            (p) => p.id === personId,
+                          );
+                          if (!person) return null;
+                          const weight = expenseShares[personId] ?? 1;
+                          const totalWeight = selectedParticipantIds.reduce(
+                            (sum, id) => sum + (expenseShares[id] ?? 1),
+                            0,
+                          );
+                          const amountNum = Number(expenseAmount);
+                          const portion =
+                            totalWeight > 0 && Number.isFinite(amountNum)
+                              ? (amountNum * weight) / totalWeight
+                              : 0;
+                          const portionLabel =
+                            Number.isFinite(portion) && portion > 0
+                              ? `${formatMoney(portion, expenseCurrency)}`
+                              : "—";
+                          return (
+                            <div
+                              key={personId}
+                              className="grid grid-cols-[1fr_auto_auto] items-center gap-3 min-h-10 px-3 rounded-control border border-line bg-white"
+                            >
+                              <span className="truncate text-[0.92rem] font-medium text-ink">
+                                {person.name}
+                              </span>
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  aria-label="Уменьшить долю"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-control border border-line bg-white text-ink hover:bg-[#F4F4F1] disabled:opacity-40"
+                                  disabled={weight <= 0}
+                                  onClick={() =>
+                                    setExpenseShares((prev) => ({
+                                      ...prev,
+                                      [personId]: Math.max(
+                                        0,
+                                        (prev[personId] ?? 1) - 1,
+                                      ),
+                                    }))
+                                  }
+                                >
+                                  −
+                                </button>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={0}
+                                  max={99}
+                                  value={weight}
+                                  onChange={(e) => {
+                                    const raw = Number(e.target.value);
+                                    const next = Number.isFinite(raw)
+                                      ? Math.max(0, Math.min(99, Math.floor(raw)))
+                                      : 0;
+                                    setExpenseShares((prev) => ({
+                                      ...prev,
+                                      [personId]: next,
+                                    }));
+                                  }}
+                                  className="w-10 h-7 text-center rounded-control border border-line text-[0.92rem] font-semibold tabular-nums focus:outline-none focus:border-ink"
+                                  aria-label={`Доля для ${person.name}`}
+                                />
+                                <button
+                                  type="button"
+                                  aria-label="Увеличить долю"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-control border border-line bg-white text-ink hover:bg-[#F4F4F1]"
+                                  onClick={() =>
+                                    setExpenseShares((prev) => ({
+                                      ...prev,
+                                      [personId]: Math.min(
+                                        99,
+                                        (prev[personId] ?? 1) + 1,
+                                      ),
+                                    }))
+                                  }
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <span className="font-mono tabular-nums text-[0.85rem] text-muted whitespace-nowrap">
+                                {portionLabel}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 px-1 text-[0.78rem] text-muted">
+                        Сумма долей делит трату пропорционально. Например,
+                        доли 2 и 1 → 67% / 33%.
+                      </p>
+                    </fieldset>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="flex gap-2">
                 <Button
                   type="submit"
@@ -1209,7 +1386,18 @@ export function ExpenseCalculator({
                       </div>
                       <p className="text-[0.85rem] text-muted leading-snug">
                         Оплатил: {getPersonName(expense.payerId)}. Участвуют:{" "}
-                        {expense.participantIds.map(getPersonName).join(", ")}.
+                        {expense.shares &&
+                        Object.keys(expense.shares).length > 0
+                          ? expense.participantIds
+                              .map((id) => {
+                                const w = expense.shares?.[id] ?? 1;
+                                return `${getPersonName(id)} (${w})`;
+                              })
+                              .join(", ")
+                          : expense.participantIds
+                              .map(getPersonName)
+                              .join(", ")}
+                        .
                       </p>
                     </article>
                   );

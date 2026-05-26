@@ -32,6 +32,17 @@ export type Expense = {
    * via getCategory().
    */
   category?: string;
+  /**
+   * Optional weighted split: maps participant id → number of shares.
+   * When present, the expense is divided proportionally to shares
+   * (sum of weights → 100%). When absent or empty, the split is equal
+   * across `participantIds` — the historical behaviour.
+   *
+   * Persisted inside the project's `payload jsonb`. Additive change:
+   * older clients (including iOS) that don't know about `shares` will
+   * still read/render the expense, just falling back to equal split.
+   */
+  shares?: Record<string, number>;
 };
 
 export type Transfer = {
@@ -71,19 +82,62 @@ export function getTotalAmount(expenses: Expense[]): number {
   return expenses.reduce((sum, expense) => sum + toPrimary(expense), 0);
 }
 
+/**
+ * Resolves how much each participant owes for a single expense.
+ * Returns a map of participantId → amount in the project's primary currency.
+ *
+ * Two modes:
+ *  - `shares` is defined and at least one participant has weight > 0
+ *    → weighted split: each participant pays `amount * (weight / totalWeight)`
+ *    Participants in `participantIds` without an entry in `shares`
+ *    (or with weight 0) get 0 — they're listed but don't pay.
+ *  - otherwise → equal split across `participantIds`.
+ *
+ * `validIds` filters out participants whose Person was removed.
+ */
+function shareBreakdown(expense: Expense, validIds: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!validIds.length) return out;
+
+  const amount = toPrimary(expense);
+  const shares = expense.shares;
+
+  if (shares && typeof shares === "object") {
+    let totalWeight = 0;
+    for (const id of validIds) {
+      const w = shares[id];
+      if (typeof w === "number" && Number.isFinite(w) && w > 0) {
+        totalWeight += w;
+      }
+    }
+    if (totalWeight > 0) {
+      for (const id of validIds) {
+        const w = shares[id];
+        const weight =
+          typeof w === "number" && Number.isFinite(w) && w > 0 ? w : 0;
+        out.set(id, amount * (weight / totalWeight));
+      }
+      return out;
+    }
+    // Falls through to equal split if all weights are 0 / invalid.
+  }
+
+  const equal = amount / validIds.length;
+  for (const id of validIds) out.set(id, equal);
+  return out;
+}
+
 export function calculatePersonalCosts(people: Person[], expenses: Expense[]): PersonalCost[] {
   const costs = new Map(people.map((person) => [person.id, 0]));
 
   expenses.forEach((expense) => {
-    const amount = toPrimary(expense);
     const participantIds = expense.participantIds.filter((id) => costs.has(id));
     if (!participantIds.length) {
       return;
     }
-
-    const share = amount / participantIds.length;
-    participantIds.forEach((personId) => {
-      costs.set(personId, (costs.get(personId) ?? 0) + share);
+    const breakdown = shareBreakdown(expense, participantIds);
+    breakdown.forEach((value, personId) => {
+      costs.set(personId, (costs.get(personId) ?? 0) + value);
     });
   });
 
@@ -105,9 +159,9 @@ export function calculateTransfers(people: Person[], expenses: Expense[]): Trans
 
     balances.set(expense.payerId, (balances.get(expense.payerId) ?? 0) + amount);
 
-    const share = amount / participantIds.length;
-    participantIds.forEach((personId) => {
-      balances.set(personId, (balances.get(personId) ?? 0) - share);
+    const breakdown = shareBreakdown(expense, participantIds);
+    breakdown.forEach((value, personId) => {
+      balances.set(personId, (balances.get(personId) ?? 0) - value);
     });
   });
 
