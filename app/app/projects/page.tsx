@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/app-header/app-header";
 import { LinkButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DeleteProjectButton } from "@/components/projects/delete-project-button";
+import { GuestImportBanner } from "@/components/guest-import-banner";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getCurrency } from "@/lib/currencies";
 
@@ -102,6 +103,8 @@ export default async function ProjectsPage() {
         email={email}
         active="projects"
       />
+
+      <GuestImportBanner />
 
       <section className="grid gap-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">

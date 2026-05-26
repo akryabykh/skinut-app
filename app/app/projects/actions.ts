@@ -109,6 +109,46 @@ export async function createProject(formData: FormData) {
   redirect(`/app?project=${projectId}`);
 }
 
+// Import a guest-mode calculator state as a new project. Called from
+// `<GuestImportBanner />` on /app/projects when the user signs in while
+// a local state still lives in localStorage. Creates a default RUB-only
+// project, writes the payload through saveProjectPayload (which enriches
+// currency fields), and returns the new id so the client can navigate
+// to it. Does NOT redirect — caller decides navigation.
+export async function importGuestProject(
+  payload: unknown,
+): Promise<{ id: string }> {
+  const { supabase } = await requireUser();
+
+  let name = "Локальный расчёт";
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "projectName" in payload
+  ) {
+    const candidate = (payload as { projectName: unknown }).projectName;
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      name = candidate.trim().slice(0, 120);
+    }
+  }
+
+  const { data: projectId, error } = await supabase.rpc("create_app_project", {
+    p_name: name,
+    p_primary_currency: DEFAULT_PRIMARY_CURRENCY,
+    p_secondary_currency: null,
+  });
+  if (error || !projectId) {
+    throw new Error(error?.message ?? "Не удалось создать проект");
+  }
+
+  // Persist the payload through the normal save path so currency
+  // enrichment runs (legacy expenses get exchange_rate_used stamped, etc.).
+  await saveProjectPayload(projectId as string, payload);
+
+  revalidatePath("/app/projects");
+  return { id: projectId as string };
+}
+
 const renameSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1, "Название обязательно").max(120, "Слишком длинное"),
