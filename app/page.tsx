@@ -11,6 +11,7 @@ import { Brand } from "@/components/brand";
 import { LinkButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createAnonProject } from "@/app/app/projects/anon-actions";
 
 export default async function HomePage() {
   const supabase = await createSupabaseServerClient();
@@ -82,16 +83,26 @@ export default async function HomePage() {
                 Открыть калькулятор
               </LinkButton>
             ) : (
-              <LinkButton href="/app" variant="secondary" size="cta">
-                <span>Просто посчитать</span>
-                <ArrowRight size={18} aria-hidden="true" />
-              </LinkButton>
+              // Block 14: «Просто посчитать» создаёт анонимный проект
+              // на сервере и редиректит на /p/<edit_token>. URL в строке
+              // сразу shareable — можно отправить друзьям. Расчёт живёт
+              // 30 дней с последней правки; зарегистрироваться можно в
+              // любой момент, чтобы сделать его бессрочным.
+              <form action={createAnonProject}>
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center gap-2 rounded-control font-semibold tracking-[-0.005em] transition-colors duration-150 disabled:opacity-55 disabled:cursor-not-allowed focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent h-11 sm:h-12 px-5 text-[0.98rem] bg-white text-ink border border-line hover:border-[#D4D4D8] hover:bg-[#F4F4F1]"
+                >
+                  <span>Просто посчитать</span>
+                  <ArrowRight size={18} aria-hidden="true" />
+                </button>
+              </form>
             )}
           </div>
           <p className="text-[0.85rem] text-muted pt-1">
             {isAuthenticated
               ? "Без рекламы. Данные хранятся только у вас."
-              : "Без рекламы. Считать можно без регистрации — расчёт сохранится в браузере."}
+              : "Без рекламы. Создайте расчёт без регистрации — поделитесь ссылкой, любой откроет и внесёт траты."}
           </p>
         </div>
 
