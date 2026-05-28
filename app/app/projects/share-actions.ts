@@ -95,3 +95,47 @@ export async function disableShare(formData: FormData): Promise<void> {
 
   revalidatePath(`/app/projects/${parsed.data.projectId}`);
 }
+
+// Block 14: edit-by-link. Mints a fresh edit_token uuid on the owned
+// project, so a `/p/<token>` URL becomes editable by anyone with it.
+// RLS UPDATE policy gates this to owner/editor — viewers can't enable.
+// Overwrites prior token if one existed (works as "rotate / revoke").
+export async function enableEditLink(formData: FormData): Promise<void> {
+  const parsed = projectIdSchema.safeParse({
+    projectId: formData.get("projectId"),
+  });
+  if (!parsed.success) throw new Error("Некорректный id");
+
+  const { supabase } = await requireUser();
+
+  const newToken = crypto.randomUUID();
+  const { error } = await supabase
+    .from("app_projects")
+    .update({ edit_token: newToken })
+    .eq("id", parsed.data.projectId);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/app/projects/${parsed.data.projectId}`);
+}
+
+// Disables edit-by-link. Existing /p/<token> URLs immediately stop
+// working (404 → AnonExpiredPage on the route). Owner can re-enable
+// at any time, which will mint a new (different) token.
+export async function disableEditLink(formData: FormData): Promise<void> {
+  const parsed = projectIdSchema.safeParse({
+    projectId: formData.get("projectId"),
+  });
+  if (!parsed.success) throw new Error("Некорректный id");
+
+  const { supabase } = await requireUser();
+
+  const { error } = await supabase
+    .from("app_projects")
+    .update({ edit_token: null })
+    .eq("id", parsed.data.projectId);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/app/projects/${parsed.data.projectId}`);
+}

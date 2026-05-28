@@ -42,10 +42,12 @@ export type Database = {
       app_projects: {
         Row: {
           id: string;
-          owner_id: string;
+          owner_id: string | null;
           name: string;
           payload: Json;
           share_token: string | null;
+          edit_token: string | null;
+          expires_at: string | null;
           primary_currency: string;
           secondary_currency: string | null;
           manual_rate: number | null;
@@ -54,10 +56,12 @@ export type Database = {
         };
         Insert: {
           id?: string;
-          owner_id: string;
+          owner_id?: string | null;
           name?: string;
           payload?: Json;
           share_token?: string | null;
+          edit_token?: string | null;
+          expires_at?: string | null;
           primary_currency?: string;
           secondary_currency?: string | null;
           manual_rate?: number | null;
@@ -66,10 +70,12 @@ export type Database = {
         };
         Update: {
           id?: string;
-          owner_id?: string;
+          owner_id?: string | null;
           name?: string;
           payload?: Json;
           share_token?: string | null;
+          edit_token?: string | null;
+          expires_at?: string | null;
           primary_currency?: string;
           secondary_currency?: string | null;
           manual_rate?: number | null;
@@ -164,6 +170,38 @@ export type Database = {
       upsert_exchange_rate: {
         Args: { p_base: string; p_target: string; p_rate: number };
         Returns: undefined;
+      };
+      // Block 14: anonymous projects + edit-by-link + 30d TTL.
+      create_anon_project: {
+        Args: {
+          p_name?: string | null;
+          p_primary_currency?: string;
+          p_secondary_currency?: string | null;
+        };
+        Returns: string;
+      };
+      get_anon_project: {
+        Args: { p_token: string };
+        Returns: {
+          id: string;
+          name: string;
+          payload: Json;
+          primary_currency: string;
+          secondary_currency: string | null;
+          manual_rate: number | null;
+          share_token: string | null;
+          expires_at: string;
+          owner_id: string | null;
+          updated_at: string;
+        }[];
+      };
+      update_anon_project: {
+        Args: { p_token: string; p_payload: Json; p_name?: string | null };
+        Returns: string;
+      };
+      claim_anon_project: {
+        Args: { p_token: string };
+        Returns: string;
       };
     };
     Enums: { [_ in never]: never };

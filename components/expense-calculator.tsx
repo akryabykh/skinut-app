@@ -36,11 +36,14 @@ import { CategoryDonut } from "@/components/ui/category-donut";
 import { ShareProjectButton } from "@/components/share-project-button";
 import { AppHeader } from "@/components/app-header/app-header";
 import { GuestNudgeBanner } from "@/components/guest-nudge-banner";
+import { AnonExpiryBanner } from "@/components/anon-expiry-banner";
+import { AnonClaimBanner } from "@/components/anon-claim-banner";
 import { GUEST_STORAGE_KEY } from "@/lib/guest-storage";
 import {
   fetchCurrentRate,
   saveProjectPayload,
 } from "@/app/app/projects/actions";
+import { saveAnonProjectPayload } from "@/app/app/projects/anon-actions";
 import {
   calculatePersonalCosts,
   calculateTransfers,
@@ -98,6 +101,12 @@ type ExpenseCalculatorProps = {
   userDisplayName?: string;
   userAvatarUrl?: string | null;
   userEmail?: string;
+  /** Block 14: edit-by-link token. When set, calculator runs in anon
+   *  mode — saves go through `saveAnonProjectPayload` instead of the
+   *  authenticated path. `anonExpiresAt` powers the countdown banner. */
+  anonToken?: string;
+  anonExpiresAt?: string | null;
+  anonIsAuthenticated?: boolean;
 };
 
 type SyncStatus = "idle" | "saving" | "saved" | "error";
@@ -204,13 +213,27 @@ export function ExpenseCalculator({
   userDisplayName,
   userAvatarUrl = null,
   userEmail,
+  anonToken,
+  anonExpiresAt = null,
+  anonIsAuthenticated = false,
 }: ExpenseCalculatorProps = {}) {
   const isOwnedProject = Boolean(projectId);
+  const isAnonProject = Boolean(anonToken);
+  // Anon project counts as «server-backed» for state-init purposes: we
+  // already have an initialPayload from RPC, no localStorage round-trip.
+  const isServerBacked = isOwnedProject || isAnonProject;
   const isReadOnly = !canEdit;
   const hasSecondary = Boolean(secondaryCurrency);
 
+  // Anon-mode expiry is bumped by the server on every save — we mirror
+  // it client-side so the countdown banner reflects fresh state without
+  // a route refresh.
+  const [anonExpiresAtState, setAnonExpiresAtState] = useState<string | null>(
+    anonExpiresAt,
+  );
+
   const [state, setState] = useState<ProjectState>(() => {
-    if (isOwnedProject) {
+    if (isServerBacked) {
       return normalizeState({
         ...(initialPayload ?? {}),
         projectName: initialName ?? initialPayload?.projectName,
@@ -248,7 +271,7 @@ export function ExpenseCalculator({
   // submit button updates the existing record instead of appending a new one.
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
-  const [isReady, setIsReady] = useState(isOwnedProject);
+  const [isReady, setIsReady] = useState(isServerBacked);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
 
@@ -265,9 +288,10 @@ export function ExpenseCalculator({
   const peopleIds = useMemo(() => state.people.map((p) => p.id), [state.people]);
   const peopleIdsKey = peopleIds.join("|");
 
-  // Guest mode: load saved state from localStorage on mount.
+  // Guest (localStorage) mode: load saved state on mount. Anon-token
+  // and owned projects are server-backed and hydrated from initialPayload.
   useEffect(() => {
-    if (isOwnedProject) return;
+    if (isServerBacked) return;
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -281,7 +305,7 @@ export function ExpenseCalculator({
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (syncResetTimer.current) clearTimeout(syncResetTimer.current);
     };
-  }, [isOwnedProject]);
+  }, [isServerBacked]);
 
   useEffect(() => {
     setSelectedParticipantIds((prev) => {
@@ -296,6 +320,36 @@ export function ExpenseCalculator({
   const persistState = useCallback(
     (nextState: ProjectState) => {
       if (isReadOnly) return;
+      if (isAnonProject && anonToken) {
+        // Anon-mode save: same debounce + sync-indicator UX, but routes
+        // through update_anon_project RPC. Each successful save bumps
+        // expires_at on the server; we mirror it locally so the countdown
+        // banner refreshes immediately.
+        setSyncStatus("saving");
+        if (syncResetTimer.current) {
+          clearTimeout(syncResetTimer.current);
+          syncResetTimer.current = null;
+        }
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          saveAnonProjectPayload(anonToken, nextState, nextState.projectName)
+            .then(({ expiresAt }) => {
+              setAnonExpiresAtState(expiresAt);
+              setSyncStatus("saved");
+              syncResetTimer.current = setTimeout(() => {
+                setSyncStatus((current) =>
+                  current === "saved" ? "idle" : current,
+                );
+                syncResetTimer.current = null;
+              }, 2000);
+            })
+            .catch((error: unknown) => {
+              console.warn("Unable to save anon project", error);
+              setSyncStatus("error");
+            });
+        }, 600);
+        return;
+      }
       if (isOwnedProject && projectId) {
         // Immediately flip to "saving" — user sees feedback before the
         // 600ms debounce even kicks in.
@@ -330,7 +384,7 @@ export function ExpenseCalculator({
         }
       }
     },
-    [isOwnedProject, projectId, isReadOnly],
+    [isOwnedProject, projectId, isReadOnly, isAnonProject, anonToken],
   );
 
   function commitState(nextState: ProjectState) {
@@ -748,17 +802,29 @@ export function ExpenseCalculator({
           active="projects"
         />
       ) : (
-        // Guest mode: simple branding + nudge banner.
+        // Non-authenticated header: guest (localStorage) or anon (server-
+        // backed by edit_token). Both get a brand mark; the banner under
+        // it is mode-specific.
         <>
           <header className="flex items-center mb-6">
             <div className="grid gap-1">
               <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted">
-                Калькулятор расходов
+                {isAnonProject ? "Расчёт по ссылке" : "Калькулятор расходов"}
               </p>
               <Brand href="/" />
             </div>
           </header>
-          <GuestNudgeBanner />
+          {isAnonProject && anonIsAuthenticated && anonToken ? (
+            <AnonClaimBanner token={anonToken} />
+          ) : null}
+          {isAnonProject ? (
+            <AnonExpiryBanner
+              expiresAt={anonExpiresAtState}
+              isAuthenticated={anonIsAuthenticated}
+            />
+          ) : (
+            <GuestNudgeBanner />
+          )}
         </>
       )}
 
