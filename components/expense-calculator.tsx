@@ -107,6 +107,10 @@ type ExpenseCalculatorProps = {
   anonToken?: string;
   anonExpiresAt?: string | null;
   anonIsAuthenticated?: boolean;
+  /** Block 14c: true if /p/<token> opens a project that's already been
+   *  claimed (owner_id is set). Hides claim-banner — proект уже не
+   *  «бесхозный», некого предлагать «забрать к себе». */
+  anonProjectClaimed?: boolean;
 };
 
 type SyncStatus = "idle" | "saving" | "saved" | "error";
@@ -216,6 +220,7 @@ export function ExpenseCalculator({
   anonToken,
   anonExpiresAt = null,
   anonIsAuthenticated = false,
+  anonProjectClaimed = false,
 }: ExpenseCalculatorProps = {}) {
   const isOwnedProject = Boolean(projectId);
   const isAnonProject = Boolean(anonToken);
@@ -814,7 +819,10 @@ export function ExpenseCalculator({
               <Brand href="/" />
             </div>
           </header>
-          {isAnonProject && anonIsAuthenticated && anonToken ? (
+          {isAnonProject &&
+          anonIsAuthenticated &&
+          anonToken &&
+          !anonProjectClaimed ? (
             <AnonClaimBanner token={anonToken} />
           ) : null}
           {isAnonProject ? (
