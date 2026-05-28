@@ -43,27 +43,27 @@ export default async function AnonProjectPage({ params }: PageProps) {
     return <AnonExpiredPage />;
   }
 
-  // Если проект уже заклеймлен (owner_id IS NOT NULL) — get_anon_project
-  // его уже не вернёт, потому что update_anon_project NULL'ит edit_token
-  // при claim. Но на всякий пожарный — обрабатываем.
-  if (project.owner_id) {
-    return <AnonExpiredPage />;
-  }
+  // Block 14c: после claim owner_id ставится, но edit_token остаётся —
+  // ссылка продолжает работать. Не возвращаем 410 если owner_id IS NOT NULL:
+  // /p/<token> работает и для анона (без owner), и для уже-заклеймленного
+  // проекта. Различие — в claim-баннере (показываем только если ещё анон).
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const initialPayload = (project.payload ?? {}) as Record<string, unknown>;
+  const isClaimed = project.owner_id !== null;
 
   // ExpenseCalculator already renders its own <main>. AnonClaimBanner is
-  // rendered inside the calculator (when anonIsAuthenticated) so we don't
-  // nest <main> elements.
+  // rendered inside the calculator when authenticated AND project still
+  // anon (not yet claimed).
   return (
     <ExpenseCalculator
       anonToken={token}
       anonExpiresAt={project.expires_at}
       anonIsAuthenticated={Boolean(user)}
+      anonProjectClaimed={isClaimed}
       initialName={project.name}
       initialPayload={initialPayload as never}
       canEdit={true}
