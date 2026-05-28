@@ -30,7 +30,7 @@ export default async function ProjectDetailPage({
   const { data: project } = await supabase
     .from("app_projects")
     .select(
-      "id, name, share_token, primary_currency, secondary_currency, manual_rate, payload",
+      "id, name, share_token, edit_token, primary_currency, secondary_currency, manual_rate, payload",
     )
     .eq("id", id)
     .maybeSingle();
@@ -142,6 +142,7 @@ export default async function ProjectDetailPage({
           projectId={project.id}
           projectName={project.name}
           shareToken={project.share_token}
+          editToken={project.edit_token}
           members={members}
           currentUserId={user.id}
           myRole={myMembership.role}

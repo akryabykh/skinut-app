@@ -33,7 +33,12 @@ import {
   removeMember,
   transferOwnership,
 } from "../members-actions";
-import { disableShare, enableShare } from "../share-actions";
+import {
+  disableEditLink,
+  disableShare,
+  enableEditLink,
+  enableShare,
+} from "../share-actions";
 import {
   emptyMembersFormState,
   ROLE_LABEL_RU,
@@ -45,6 +50,7 @@ type ProjectManagementProps = {
   projectId: string;
   projectName: string;
   shareToken: string | null;
+  editToken: string | null;
   members: MemberInfo[];
   currentUserId: string;
   myRole: MemberRole;
@@ -147,6 +153,7 @@ export function ProjectManagement({
   projectId,
   projectName,
   shareToken,
+  editToken,
   members,
   currentUserId,
   myRole,
@@ -298,6 +305,34 @@ export function ProjectManagement({
       // Fallback: select the input so the user can copy manually.
       const input = document.getElementById(
         "share-link-input",
+      ) as HTMLInputElement | null;
+      input?.select();
+    }
+  }
+
+  // Edit-by-link URL: parallel to shareUrl but for /p/<edit_token>
+  // (read+write access). Block 14.
+  const [editUrl, setEditUrl] = useState("");
+  const [editCopied, setEditCopied] = useState(false);
+
+  useEffect(() => {
+    if (editToken) {
+      setEditUrl(`${window.location.origin}/p/${editToken}`);
+    } else {
+      setEditUrl("");
+    }
+    setEditCopied(false);
+  }, [editToken]);
+
+  async function copyEditUrl() {
+    if (!editUrl) return;
+    try {
+      await navigator.clipboard.writeText(editUrl);
+      setEditCopied(true);
+      setTimeout(() => setEditCopied(false), 2000);
+    } catch {
+      const input = document.getElementById(
+        "edit-link-input",
       ) as HTMLInputElement | null;
       input?.select();
     }
@@ -739,6 +774,99 @@ export function ProjectManagement({
                 <input type="hidden" name="projectId" value={projectId} />
                 <Button type="submit" variant="primary" size="md">
                   Создать публичную ссылку
+                </Button>
+              </form>
+            </>
+          )}
+        </Card>
+      ) : null}
+
+      {/* === Edit-by-link (Block 14) === */}
+      {canEdit ? (
+        <Card className="!p-6">
+          <h2 className="text-[1.15rem] font-bold tracking-[-0.01em] text-ink mb-1">
+            Редактирование по ссылке
+          </h2>
+          {editToken ? (
+            <>
+              <p className="text-[0.92rem] text-muted leading-snug mb-4">
+                По этой ссылке любой может открыть проект и{" "}
+                <strong className="text-ink font-semibold">вносить траты</strong>{" "}
+                без регистрации. Удобно для попутчиков, которые не хотят заводить
+                аккаунт. Когда пускать новых не нужно — сбросьте ссылку.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                <Input
+                  id="edit-link-input"
+                  type="text"
+                  readOnly
+                  value={editUrl || `…/p/${editToken}`}
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="font-mono text-[0.82rem]"
+                />
+                <Button
+                  type="button"
+                  onClick={copyEditUrl}
+                  variant="primary"
+                  size="md"
+                  disabled={!editUrl}
+                >
+                  {editCopied ? (
+                    <>
+                      <Check size={16} aria-hidden="true" />
+                      <span>Скопировано</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={16} aria-hidden="true" />
+                      <span>Скопировать</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <form
+                  action={enableEditLink}
+                  onSubmit={confirmThenSubmit({
+                    title: "Сбросить ссылку?",
+                    description:
+                      "Старая ссылка перестанет работать сразу — у тех, кто открывал по ней, доступ пропадёт.",
+                    confirmLabel: "Сбросить",
+                    variant: "default",
+                  })}
+                >
+                  <input type="hidden" name="projectId" value={projectId} />
+                  <Button type="submit" variant="secondary" size="sm">
+                    Сбросить ссылку
+                  </Button>
+                </form>
+                <form
+                  action={disableEditLink}
+                  onSubmit={confirmThenSubmit({
+                    title: "Отключить редактирование по ссылке?",
+                    description:
+                      "Текущие пользователи по ссылке потеряют доступ. Только участники-аккаунты смогут редактировать.",
+                    confirmLabel: "Отключить",
+                  })}
+                >
+                  <input type="hidden" name="projectId" value={projectId} />
+                  <Button type="submit" variant="danger" size="sm">
+                    Отключить
+                  </Button>
+                </form>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[0.92rem] text-muted leading-snug mb-4">
+                Включите, если хотите дать другим возможность вносить траты без
+                регистрации. У вас останется полный контроль — отозвать доступ
+                можно в любой момент.
+              </p>
+              <form action={enableEditLink}>
+                <input type="hidden" name="projectId" value={projectId} />
+                <Button type="submit" variant="primary" size="md">
+                  Открыть редактирование по ссылке
                 </Button>
               </form>
             </>
