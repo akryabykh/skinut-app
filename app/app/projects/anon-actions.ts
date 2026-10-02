@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { SAVE_CONFLICT_MESSAGE, type SaveResult } from "@/lib/project-save-queue";
 
 // Тонкие обёртки вокруг RPC из миграции 20260528_anon_projects.sql.
 // SECURITY DEFINER на стороне БД отвечает за реальную авторизацию;
@@ -24,26 +25,29 @@ export async function createAnonProject(): Promise<never> {
   redirect(`/p/${token}`);
 }
 
-/** Пишет payload анон-проекта. Возвращает новый expires_at, чтобы клиент
- *  мог сразу обновить баннер «удалится через N дней». Если RPC бросает
- *  P0002 (проект заклеймлен / просрочен) — пробрасываем как обычную
- *  ошибку, клиент обработает (показав 410 или ре-фетчнув). */
+/** Saves only the version the caller loaded. Claimed projects remain
+ * writable by edit-link and return a null expiry; stale snapshots return
+ * a conflict without touching the current calculation. */
 export async function saveAnonProjectPayload(
   token: string,
   payload: unknown,
+  expectedUpdatedAt: string,
   name?: string,
-): Promise<{ expiresAt: string }> {
+): Promise<SaveResult> {
   if (!token) throw new Error("Пустой token");
   const supabase = await createSupabaseServerClient();
   // Cast through unknown: payload arrives as the calculator's ProjectState
   // which is JSON-compatible at runtime but TS's Json union is narrower.
-  const { data, error } = await supabase.rpc("update_anon_project", {
+  const { data, error } = await supabase.rpc("save_anon_project", {
     p_token: token,
     p_payload: payload as never,
+    p_expected_updated_at: expectedUpdatedAt,
     p_name: name ?? null,
   });
-  if (error) throw new Error(error.message);
-  return { expiresAt: data as string };
+  if (error) return { ok: false, reason: "error", message: "Не удалось сохранить расчёт. Повторите попытку." };
+  const saved = data?.[0];
+  if (!saved) return { ok: false, reason: "conflict", message: SAVE_CONFLICT_MESSAGE };
+  return { ok: true, updatedAt: saved.updated_at, expiresAt: saved.expires_at };
 }
 
 /** Авторизованный юзер забирает анон в свою собственность. Возвращает
