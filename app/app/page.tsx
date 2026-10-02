@@ -39,7 +39,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   const { data: project } = await supabase
     .from("app_projects")
     .select(
-      "id, name, payload, primary_currency, secondary_currency, manual_rate, share_token",
+      "id, name, payload, primary_currency, secondary_currency, manual_rate, share_token, updated_at",
     )
     .eq("id", projectId)
     .maybeSingle();
@@ -85,6 +85,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   // We identify member-people by id === auth.users.id (uuid format same
   // as crypto.randomUUID() — won't collide). Manual people added via the
   // form keep their own client-generated ids and are untouched.
+  let workingUpdatedAt = project.updated_at;
   let workingPayload = (project.payload ?? {}) as {
     people?: Person[];
     expenses?: unknown;
@@ -111,12 +112,17 @@ export default async function AppPage({ searchParams }: AppPageProps) {
         ...workingPayload,
         people: [...(workingPayload.people ?? []), ...newPeople],
       };
-      // Best-effort save back — if it fails (e.g. RLS), the in-memory
-      // payload is still sent to the client and saved on the next edit.
-      await supabase
+      // Don't overwrite expenses saved while we loaded member profiles.
+      // Carry the successful write's version into the client's first save.
+      const { data: synced, error: syncError } = await supabase
         .from("app_projects")
         .update({ payload: workingPayload as never })
-        .eq("id", project.id);
+        .eq("id", project.id)
+        .eq("updated_at", workingUpdatedAt)
+        .select("updated_at")
+        .maybeSingle();
+      if (syncError || !synced) throw new Error("Проект изменился. Обновите страницу.");
+      workingUpdatedAt = synced.updated_at;
     }
   }
 
@@ -148,10 +154,14 @@ export default async function AppPage({ searchParams }: AppPageProps) {
         currentRate = result.rate;
         // Lazy backfill — фиксируем курс на проекте, чтобы это был
         // последний раз, когда мы дёрнули live API для этого проекта.
-        await supabase
+        const { data: backfilled } = await supabase
           .from("app_projects")
           .update({ manual_rate: currentRate })
-          .eq("id", project.id);
+          .eq("id", project.id)
+          .eq("updated_at", workingUpdatedAt)
+          .select("updated_at")
+          .maybeSingle();
+        if (backfilled) workingUpdatedAt = backfilled.updated_at;
       } catch (err) {
         console.warn(
           `[app/page] backfill manual_rate ${project.secondary_currency}→${primaryCode} failed`,
@@ -163,7 +173,9 @@ export default async function AppPage({ searchParams }: AppPageProps) {
 
   return (
     <ExpenseCalculator
+      key={project.id}
       projectId={project.id}
+      initialUpdatedAt={workingUpdatedAt}
       initialName={project.name}
       initialPayload={workingPayload as never}
       canEdit={canEdit}

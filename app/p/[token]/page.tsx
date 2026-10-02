@@ -60,6 +60,8 @@ export default async function AnonProjectPage({ params }: PageProps) {
   // anon (not yet claimed).
   return (
     <ExpenseCalculator
+      key={token}
+      initialUpdatedAt={project.updated_at ?? undefined}
       anonToken={token}
       anonExpiresAt={project.expires_at}
       anonIsAuthenticated={Boolean(user)}

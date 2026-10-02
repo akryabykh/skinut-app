@@ -190,10 +190,14 @@ export type Database = {
           secondary_currency: string | null;
           manual_rate: number | null;
           share_token: string | null;
-          expires_at: string;
+          expires_at: string | null;
           owner_id: string | null;
           updated_at: string;
         }[];
+      };
+      save_anon_project: {
+        Args: { p_token: string; p_payload: Json; p_expected_updated_at: string; p_name?: string | null };
+        Returns: { updated_at: string; expires_at: string | null }[];
       };
       update_anon_project: {
         Args: { p_token: string; p_payload: Json; p_name?: string | null };
