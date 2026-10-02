@@ -89,6 +89,7 @@ npm run dev
 
 ```bash
 npm run dev    # dev-сервер с HMR
+npm test       # регрессионные проверки данных и SQL-миграций
 npm run lint   # ESLint
 npm run build  # production-сборка (typecheck + bundle)
 ```
@@ -161,6 +162,7 @@ RLS включён на всех таблицах. Проекты видны т�
 
 ## Документация
 
+- [`docs/DATA-SAFETY-RELEASE.md`](docs/DATA-SAFETY-RELEASE.md) — исправления сохранения и порядок выпуска миграции.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) — состояние проекта для следующего сеанса разработки (что сделано, правила, технические долги, план).
 - [`docs/BATTLE_CARD.md`](docs/BATTLE_CARD.md) — внутренний разбор позиционирования против Splitwise и Tricount.
 

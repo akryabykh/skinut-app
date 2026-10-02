@@ -37,5 +37,7 @@ export async function updateSession(request: NextRequest) {
   // a subtle way (works on fresh sessions, fails an hour later).
   await supabase.auth.getUser();
 
+  // Authenticated HTML/RSC responses must not survive in a browser cache.
+  supabaseResponse.headers.set("Cache-Control", "private, no-store");
   return supabaseResponse;
 }

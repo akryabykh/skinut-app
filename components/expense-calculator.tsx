@@ -39,6 +39,7 @@ import { GuestNudgeBanner } from "@/components/guest-nudge-banner";
 import { AnonExpiryBanner } from "@/components/anon-expiry-banner";
 import { AnonClaimBanner } from "@/components/anon-claim-banner";
 import { GUEST_STORAGE_KEY } from "@/lib/guest-storage";
+import { ProjectSaveQueue, type SaveResult } from "@/lib/project-save-queue";
 import {
   fetchCurrentRate,
   saveProjectPayload,
@@ -81,6 +82,7 @@ type ProjectState = {
 type ExpenseCalculatorProps = {
   projectId?: string;
   initialName?: string;
+  initialUpdatedAt?: string;
   initialPayload?: Partial<ProjectState>;
   canEdit?: boolean;
   primaryCurrency?: string;
@@ -208,6 +210,7 @@ function sanitizeAmountInput(value: string): string {
 export function ExpenseCalculator({
   projectId,
   initialName,
+  initialUpdatedAt,
   initialPayload,
   canEdit = true,
   primaryCurrency = DEFAULT_PRIMARY_CURRENCY,
@@ -286,6 +289,41 @@ export function ExpenseCalculator({
   // ever stay in `idle` — there's no remote sync to surface.
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const syncResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveFailure, setSaveFailure] = useState<Extract<SaveResult, { ok: false }> | null>(null);
+  const saveQueue = useRef<ProjectSaveQueue<ProjectState> | null>(null);
+  const pendingSnapshot = useRef<ProjectState | null>(null);
+  if (isServerBacked && !saveQueue.current) {
+    saveQueue.current = new ProjectSaveQueue(initialUpdatedAt ?? "", async (snapshot, version) => {
+      if (anonToken) return saveAnonProjectPayload(anonToken, snapshot, version, snapshot.projectName);
+      if (projectId) return saveProjectPayload(projectId, snapshot, version);
+      return { ok: false, reason: "error", message: "Проект не найден" };
+    }, (result, hasPending) => {
+      if (!result.ok) {
+        setSaveFailure(result);
+        setSyncStatus("error");
+        return;
+      }
+      if ("expiresAt" in result) setAnonExpiresAtState(result.expiresAt ?? null);
+      if (hasPending || pendingSnapshot.current) return;
+      setSaveFailure(null);
+      setSyncStatus("saved");
+      syncResetTimer.current = setTimeout(() => {
+        setSyncStatus((current) => current === "saved" ? "idle" : current);
+      }, 2000);
+    });
+  }
+
+  useEffect(() => {
+    if (!isServerBacked || isReadOnly) return;
+    const warnOnExit = (event: BeforeUnloadEvent) => {
+      if (syncStatus === "saving" || syncStatus === "error") {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warnOnExit);
+    return () => window.removeEventListener("beforeunload", warnOnExit);
+  }, [isServerBacked, isReadOnly, syncStatus]);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { showToast, toast } = useToast();
@@ -325,61 +363,14 @@ export function ExpenseCalculator({
   const persistState = useCallback(
     (nextState: ProjectState) => {
       if (isReadOnly) return;
-      if (isAnonProject && anonToken) {
-        // Anon-mode save: same debounce + sync-indicator UX, but routes
-        // through update_anon_project RPC. Each successful save bumps
-        // expires_at on the server; we mirror it locally so the countdown
-        // banner refreshes immediately.
-        setSyncStatus("saving");
-        if (syncResetTimer.current) {
-          clearTimeout(syncResetTimer.current);
-          syncResetTimer.current = null;
-        }
+      if (isServerBacked) {
+        pendingSnapshot.current = nextState;
+        if (syncResetTimer.current) clearTimeout(syncResetTimer.current);
         if (saveTimer.current) clearTimeout(saveTimer.current);
+        setSyncStatus((current) => current === "error" ? current : "saving");
         saveTimer.current = setTimeout(() => {
-          saveAnonProjectPayload(anonToken, nextState, nextState.projectName)
-            .then(({ expiresAt }) => {
-              setAnonExpiresAtState(expiresAt);
-              setSyncStatus("saved");
-              syncResetTimer.current = setTimeout(() => {
-                setSyncStatus((current) =>
-                  current === "saved" ? "idle" : current,
-                );
-                syncResetTimer.current = null;
-              }, 2000);
-            })
-            .catch((error: unknown) => {
-              console.warn("Unable to save anon project", error);
-              setSyncStatus("error");
-            });
-        }, 600);
-        return;
-      }
-      if (isOwnedProject && projectId) {
-        // Immediately flip to "saving" — user sees feedback before the
-        // 600ms debounce even kicks in.
-        setSyncStatus("saving");
-        if (syncResetTimer.current) {
-          clearTimeout(syncResetTimer.current);
-          syncResetTimer.current = null;
-        }
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
-          saveProjectPayload(projectId, nextState)
-            .then(() => {
-              setSyncStatus("saved");
-              // Fade "saved" back to idle so it doesn't sit forever.
-              syncResetTimer.current = setTimeout(() => {
-                setSyncStatus((current) =>
-                  current === "saved" ? "idle" : current,
-                );
-                syncResetTimer.current = null;
-              }, 2000);
-            })
-            .catch((error: unknown) => {
-              console.warn("Unable to save project", error);
-              setSyncStatus("error");
-            });
+          pendingSnapshot.current = null;
+          saveQueue.current?.enqueue(nextState);
         }, 600);
       } else {
         try {
@@ -389,7 +380,7 @@ export function ExpenseCalculator({
         }
       }
     },
-    [isOwnedProject, projectId, isReadOnly, isAnonProject, anonToken],
+    [isServerBacked, isReadOnly],
   );
 
   function commitState(nextState: ProjectState) {
@@ -867,6 +858,37 @@ export function ExpenseCalculator({
                 Настройки проекта
               </span>
             </Link>
+          </div>
+        </div>
+      ) : null}
+
+      {saveFailure ? (
+        <div role="alert" className="mb-6 rounded-control border border-danger/30 bg-[#FBEAE7] p-4">
+          <p className="text-[0.93rem] text-ink">{saveFailure.message}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => {
+              const url = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: "application/json" }));
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = "skinut-unsaved-changes.json";
+              link.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}>Скачать мои правки</Button>
+            {saveFailure.reason === "error" ? (
+              <Button size="sm" onClick={() => {
+                if (saveTimer.current) clearTimeout(saveTimer.current);
+                pendingSnapshot.current = null;
+                setSaveFailure(null);
+                setSyncStatus("saving");
+                saveQueue.current?.enqueue(state);
+                saveQueue.current?.retry();
+              }}>Повторить сохранение</Button>
+            ) : (
+              <Button size="sm" onClick={async () => {
+                const ok = await confirm({ title: "Загрузить свежий расчёт?", description: "Правки на этой странице будут заменены данными с сервера. Сначала скачайте копию своих правок.", confirmLabel: "Обновить страницу" });
+                if (ok) window.location.reload();
+              }}>Обновить страницу</Button>
+            )}
           </div>
         </div>
       ) : null}

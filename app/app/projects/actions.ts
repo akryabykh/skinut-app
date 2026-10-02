@@ -10,6 +10,7 @@ import {
   type CurrencyCode,
 } from "@/lib/currencies";
 import { getExchangeRate } from "@/lib/exchange-rate";
+import { SAVE_CONFLICT_MESSAGE, type SaveResult } from "@/lib/project-save-queue";
 
 // Helper: ensures we have a Supabase client and a logged-in user.
 // If the user isn't logged in, redirects to sign-in (NEXT_REDIRECT thrown).
@@ -143,7 +144,11 @@ export async function importGuestProject(
 
   // Persist the payload through the normal save path so currency
   // enrichment runs (legacy expenses get exchange_rate_used stamped, etc.).
-  await saveProjectPayload(projectId as string, payload);
+  const { data: created, error: createdError } = await supabase
+    .from("app_projects").select("updated_at").eq("id", projectId).single();
+  if (createdError || !created) throw new Error("Не удалось загрузить созданный проект");
+  const saved = await saveProjectPayload(projectId as string, payload, created.updated_at);
+  if (!saved.ok) throw new Error(saved.message);
 
   revalidatePath("/app/projects");
   return { id: projectId as string };
@@ -289,7 +294,7 @@ export async function updateProjectCurrencies(
 
   const { data: project, error: loadError } = await supabase
     .from("app_projects")
-    .select("primary_currency, secondary_currency, manual_rate, payload")
+    .select("primary_currency, secondary_currency, manual_rate, payload, updated_at")
     .eq("id", projectId)
     .maybeSingle();
   if (loadError || !project) {
@@ -398,7 +403,10 @@ export async function updateProjectCurrencies(
   const { error: updateError } = await supabase
     .from("app_projects")
     .update(updateRow as never)
-    .eq("id", projectId);
+    .eq("id", projectId)
+    .eq("updated_at", project.updated_at)
+    .select("id")
+    .single();
 
   if (updateError) {
     throw new Error(updateError.message);
@@ -452,7 +460,8 @@ export async function deleteProject(formData: FormData) {
 export async function saveProjectPayload(
   id: string,
   payload: unknown,
-): Promise<{ updatedAt: string }> {
+  expectedUpdatedAt: string,
+): Promise<SaveResult> {
   if (typeof id !== "string" || id.length === 0) {
     throw new Error("Некорректный id");
   }
@@ -462,11 +471,15 @@ export async function saveProjectPayload(
   // Load project's currencies so we can validate & enrich.
   const { data: project, error: loadError } = await supabase
     .from("app_projects")
-    .select("primary_currency, secondary_currency, manual_rate")
+    .select("primary_currency, secondary_currency, manual_rate, updated_at")
     .eq("id", id)
     .single();
   if (loadError || !project) {
     throw new Error(loadError?.message ?? "Проект не найден");
+  }
+
+  if (!expectedUpdatedAt || project.updated_at !== expectedUpdatedAt) {
+    return { ok: false, reason: "conflict", message: SAVE_CONFLICT_MESSAGE };
   }
 
   const primary = (project.primary_currency ??
@@ -485,10 +498,8 @@ export async function saveProjectPayload(
     try {
       const result = await getExchangeRate(secondary, primary);
       manualRate = result.rate;
-      await supabase
-        .from("app_projects")
-        .update({ manual_rate: manualRate })
-        .eq("id", id);
+      // Persist the backfilled rate together with the guarded payload write.
+      // A separate update here would invalidate our own expected version.
     } catch (err) {
       console.warn(
         `[saveProjectPayload] late backfill manual_rate ${secondary}→${primary} failed`,
@@ -503,7 +514,8 @@ export async function saveProjectPayload(
     manualRate,
   });
 
-  const update: { payload: unknown; name?: string } = { payload: enrichedPayload };
+  const update: { payload: unknown; name?: string; manual_rate?: number } = { payload: enrichedPayload };
+  if (project.manual_rate === null && manualRate !== null) update.manual_rate = manualRate;
   if (
     typeof enrichedPayload === "object" &&
     enrichedPayload !== null &&
@@ -519,14 +531,13 @@ export async function saveProjectPayload(
     .from("app_projects")
     .update(update as never)
     .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt)
     .select("updated_at")
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
-    throw new Error(error?.message ?? "Не удалось сохранить");
-  }
-
-  return { updatedAt: data.updated_at };
+  if (error) return { ok: false, reason: "error", message: "Не удалось сохранить расчёт. Повторите попытку." };
+  if (!data) return { ok: false, reason: "conflict", message: SAVE_CONFLICT_MESSAGE };
+  return { ok: true, updatedAt: data.updated_at };
 }
 
 // Returns the current (cached or freshly fetched) exchange rate between

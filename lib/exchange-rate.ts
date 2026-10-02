@@ -18,6 +18,8 @@
 // "save this expense in TRY" — the server decides what TRY→primary
 // multiplier to record on it.
 
+import "server-only";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isCurrencyCode } from "@/lib/currencies";
 
@@ -92,13 +94,15 @@ export async function getExchangeRate(
     const liveRate = await fetchOpenErApiRate(baseCode, targetCode);
 
     // 3. Persist (best-effort — don't fail the user's save if this errors).
-    const { error: upsertError } = await supabase.rpc("upsert_exchange_rate", {
-      p_base: baseCode,
-      p_target: targetCode,
-      p_rate: liveRate,
-    });
-    if (upsertError) {
-      console.warn("[exchange-rate] cache write failed", upsertError);
+    try {
+      const admin = createSupabaseAdminClient();
+      const { error: upsertError } = await admin.rpc("upsert_exchange_rate", {
+        p_base: baseCode, p_target: targetCode, p_rate: liveRate,
+      });
+      if (upsertError) console.warn("[exchange-rate] cache write failed", upsertError);
+    } catch (err) {
+      // A missing service-role key disables cache writes, not live rates.
+      console.warn("[exchange-rate] cache write unavailable", err);
     }
 
     return { rate: liveRate, source: "live" };
